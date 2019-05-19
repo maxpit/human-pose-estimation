@@ -11,7 +11,7 @@ from __future__ import division
 from __future__ import print_function
 
 import numpy as np
-import cPickle as pickle
+import pickle
 
 import tensorflow as tf
 from .batch_lbs import batch_rodrigues, batch_global_rigid_transformation
@@ -28,7 +28,7 @@ class SMPL(object):
         pkl_path is the path to a SMPL model
         """
         # -- Load SMPL params --
-        with open(pkl_path, 'r') as f:
+        with open(pkl_path, 'rb') as f:
             dd = pickle.load(f)    
         # Mean template vertices
         self.v_template = tf.Variable(
@@ -70,7 +70,7 @@ class SMPL(object):
             name='lbs_weights',
             dtype=dtype,
             trainable=False)
-
+        
         # This returns 19 keypoints: 6890 x 19
         self.joint_regressor = tf.Variable(
             dd['cocoplus_regressor'].T.todense(),

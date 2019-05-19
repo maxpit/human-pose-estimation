@@ -22,7 +22,7 @@ colors = {
 
 class SMPLRenderer(object):
     def __init__(self,
-                 img_size=224,
+                 img_size=256,
                  flength=500.,
                  face_path="tf_smpl/smpl_faces.npy"):
         self.faces = np.load(face_path)
@@ -130,6 +130,18 @@ def _create_renderer(w=640,
 
     rn.camera = ProjectPoints(rt=rt, t=t, f=f, c=c, k=k)
     rn.frustum = {'near': near, 'far': far, 'height': h, 'width': w}
+    
+    flipXRotation = np.array([[1.0, 0.0, 0.0, 0.0],
+            [0.0, -1.0, 0., 0.0],
+            [0.0, 0., -1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0]])
+    rn.camera.openglMat = flipXRotation #this is from setupcamera in utils
+    rn.glMode = 'glfw'
+    rn.sharedWin = None
+    rn.overdraw = True
+    rn.nsamples = 8
+    rn.msaa = True  #Without anti-aliasing optimization often does not work.
+    
     return rn
 
 
@@ -176,6 +188,8 @@ def simple_renderer(rn,
         vc=albedo,
         light_color=np.array([.7, .7, .7]))
 
+    rn.initGL()
+
     return rn.r
 
 
@@ -214,12 +228,16 @@ def render_model(verts,
 
     # Uses img as background, otherwise white background.
     if img is not None:
+        #img = img.transpose(1,0,2)
+        #print("background_image")
+        #print(img.shape)
         rn.background_image = img / 255. if img.max() > 1 else img
 
     if color_id is None:
         color = colors['light_blue']
     else:
-        color_list = colors.values()
+        color_list = list(colors.values())
+        print(color_list)
         color = color_list[color_id % len(color_list)]
 
     imtmp = simple_renderer(rn, verts, faces, color=color)
@@ -292,19 +310,19 @@ def draw_skeleton(input_image, joints, draw_edges=True, vis=None, radius=None):
         radius = max(4, (np.mean(input_image.shape[:2]) * 0.01).astype(int))
 
     colors = {
-        'pink': np.array([197, 27, 125]),  # L lower leg
-        'light_pink': np.array([233, 163, 201]),  # L upper leg
-        'light_green': np.array([161, 215, 106]),  # L lower arm
-        'green': np.array([77, 146, 33]),  # L upper arm
-        'red': np.array([215, 48, 39]),  # head
-        'light_red': np.array([252, 146, 114]),  # head
-        'light_orange': np.array([252, 141, 89]),  # chest
-        'purple': np.array([118, 42, 131]),  # R lower leg
-        'light_purple': np.array([175, 141, 195]),  # R upper
-        'light_blue': np.array([145, 191, 219]),  # R lower arm
-        'blue': np.array([69, 117, 180]),  # R upper arm
-        'gray': np.array([130, 130, 130]),  #
-        'white': np.array([255, 255, 255]),  #
+        'pink': (197, 27, 125),# L lower leg
+        'light_pink': (233, 163, 201),# L upper leg
+        'light_green': (161, 215, 106),  # L lower arm
+        'green': (77, 146, 33),  # L upper arm
+        'red': (215, 48, 39),  # head
+        'light_red': (252, 146, 114),  # head
+        'light_orange': (252, 141, 89),  # chest
+        'purple': (118, 42, 131),  # R lower leg
+        'light_purple': (175, 141, 195),  # R upper
+        'light_blue': (145, 191, 219),  # R lower arm
+        'blue': (69, 117, 180),  # R upper arm
+        'gray': (130, 130, 130),  #
+        'white': (255, 255, 255),  #
     }
 
     image = input_image.copy()
@@ -386,8 +404,10 @@ def draw_skeleton(input_image, joints, draw_edges=True, vis=None, radius=None):
         print('Unknown skeleton!!')
         import ipdb
         ipdb.set_trace()
+    
+    print(colors['white'])
 
-    for child in xrange(len(parents)):
+    for child in range(len(parents)):
         point = joints[:, child]
         # If invisible skip
         if vis is not None and vis[child] == 0:
