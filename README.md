@@ -2,14 +2,13 @@
 
 for using this python3 branch the following installation procedure needs to be used. 
 
-install all necessary requirements as listed below but without installing chumpy and opendr
-you can install the up-to-date tensorflow version
+use `conda env create -f environment.yml` to install a new conda environment from the environment.yml file
 
-
-use the fork on https://github.com/vstarlinger/SMPL to preprocess the SMPL models from the end-2-end recovery paper and save it in the same folder as the original models with filename 'model' (or change the config to point to the correct model).
+install glfw using `pip install glfw`
 
 use the fork on https://github.com/vstarlinger/opendr and follow the installation procecdure in the readme in order to install opendr and chumpy
 
+use the fork on https://github.com/vstarlinger/SMPL to preprocess the SMPL models from the end-2-end recovery paper and save it in the same folder as the original models with filename 'model' (or change the config to point to the correct model).
 
 # End-to-end Recovery of Human Shape and Pose
 
