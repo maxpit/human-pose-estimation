@@ -8,6 +8,9 @@ use `conda activate hpe` to activate the new environment.
 
 use the fork on https://github.com/vstarlinger/opendr and follow the installation procecdure in the readme in order to install opendr and chumpy
 
+first go to the chumpy folder and install it using `python setup.py install`
+then go to the opendr folder and install it using `python setup.py install`
+
 use the fork on https://github.com/vstarlinger/SMPL to preprocess the SMPL models from the end-2-end recovery paper and save it in the same folder as the original models with filename 'model' (or change the config to point to the correct model).
 
 # End-to-end Recovery of Human Shape and Pose
