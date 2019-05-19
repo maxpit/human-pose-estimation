@@ -1,3 +1,16 @@
+# Installation 
+
+for using this python3 branch the following installation procedure needs to be used. 
+
+install all necessary requirements as listed below but without installing chumpy and opendr
+you can install the up-to-date tensorflow version
+
+
+use the fork on https://github.com/vstarlinger/SMPL to preprocess the SMPL models from the end-2-end recovery paper and save it in the same folder as the original models with filename 'model' (or change the config to point to the correct model).
+
+use the fork on https://github.com/vstarlinger/opendr and follow the installation procecdure in the readme in order to install opendr and chumpy
+
+
 # End-to-end Recovery of Human Shape and Pose
 
 Angjoo Kanazawa, Michael J. Black, David W. Jacobs, Jitendra Malik
