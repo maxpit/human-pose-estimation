@@ -4,6 +4,8 @@ for using this python3 branch the following installation procedure needs to be u
 
 use `conda env create -f environment.yml` to install a new conda environment from the environment.yml file
 
+use `conda activate hpe` to activate the new environment.
+
 install glfw using `pip install glfw`
 
 use the fork on https://github.com/vstarlinger/opendr and follow the installation procecdure in the readme in order to install opendr and chumpy
