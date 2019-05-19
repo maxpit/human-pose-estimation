@@ -1,4 +1,4 @@
-name: hpe-1
+name: hpe
 channels:
   - defaults
 dependencies:
