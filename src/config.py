@@ -54,7 +54,7 @@ flags.DEFINE_string(
 
 # Training settings:
 # TODO! If you want to train, change this to your 'tf_datasets' or specify it with the flag.
-DATA_DIR = '/scratch1/projects/tf_datasets/'
+DATA_DIR = '/home/valentin/Code/ADL/human-pose-estimation/simple_datasets'
 
 flags.DEFINE_string('data_dir', DATA_DIR, 'Where to save training models')
 flags.DEFINE_string('log_dir', 'logs', 'Where to save training models')
@@ -62,8 +62,10 @@ flags.DEFINE_string('model_dir', None, 'Where model will be saved -- filled auto
 flags.DEFINE_integer('log_img_step', 100, 'How often to visualize img during training')
 flags.DEFINE_integer('epoch', 100, '# of epochs to train')
 
-flags.DEFINE_list('datasets', ['lsp', 'lsp_ext', 'mpii', 'coco'],
+flags.DEFINE_list('datasets', ['lsp_few_new'],
                           'datasets to use for training')
+#flags.DEFINE_list('datasets', ['lsp', 'lsp_ext', 'mpii', 'coco'],
+#                          'datasets to use for training')
 flags.DEFINE_list('mocap_datasets', ['CMU', 'H3.6', 'jointLim'],
                   'datasets to use for adversarial prior training')
 

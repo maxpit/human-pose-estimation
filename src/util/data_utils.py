@@ -30,24 +30,16 @@ def parse_example_proto(example_serialized, has_3d=False):
         'mosh/gt3d'          : float_feature(shape.astype(np.float)),
     """
     feature_map = {
-        'image/encoded':
-        tf.FixedLenFeature([], dtype=tf.string, default_value=''),
-        'image/height':
-        tf.FixedLenFeature([1], dtype=tf.int64, default_value=-1),
-        'image/width':
-        tf.FixedLenFeature([1], dtype=tf.int64, default_value=-1),
-        'image/filename':
-        tf.FixedLenFeature([], dtype=tf.string, default_value=''),
-        'image/center':
-        tf.FixedLenFeature((2, 1), dtype=tf.int64),
-        'image/visibility':
-        tf.FixedLenFeature((1, 14), dtype=tf.int64),
-        'image/x':
-        tf.FixedLenFeature((1, 14), dtype=tf.float32),
-        'image/y':
-        tf.FixedLenFeature((1, 14), dtype=tf.float32),
-        'image/face_pts':
-        tf.FixedLenFeature(
+        'image/encoded': tf.FixedLenFeature([], tf.string),
+        'image/seg_gt':  tf.FixedLenFeature([], tf.string),
+        'image/height':  tf.FixedLenFeature([], tf.int64),
+        'image/width':   tf.FixedLenFeature([], tf.int64),
+        'image/filename': tf.FixedLenFeature([], tf.string),
+        'image/center': tf.FixedLenFeature((2, 1), dtype=tf.int64),
+        'image/visibility': tf.FixedLenFeature((1, 14), dtype=tf.int64),
+        'image/x': tf.FixedLenFeature((1, 14), dtype=tf.float32),
+        'image/y': tf.FixedLenFeature((1, 14), dtype=tf.float32),
+        'image/face_pts': tf.FixedLenFeature(
             (1, 15),
             dtype=tf.float32,
             default_value=[
@@ -69,10 +61,10 @@ def parse_example_proto(example_serialized, has_3d=False):
 
     features = tf.parse_single_example(example_serialized, feature_map)
 
-    height = tf.cast(features['image/height'], dtype=tf.int32)
-    width = tf.cast(features['image/width'], dtype=tf.int32)
-    center = tf.cast(features['image/center'], dtype=tf.int32)
-    fname = tf.cast(features['image/filename'], dtype=tf.string)
+    height = tf.cast(features['image/height'], tf.int32)
+    width = tf.cast(features['image/width'], tf.int32)
+    center = tf.cast(features['image/center'], tf.int32)
+    fname = tf.cast(features['image/filename'], tf.string)
     fname = tf.Print(fname, [fname], message="image name: ")
 
     face_pts = tf.reshape(
@@ -84,9 +76,22 @@ def parse_example_proto(example_serialized, has_3d=False):
 
     label = tf.concat([x, y, vis], 0)
     label = tf.concat([label, face_pts], 1)
+    
+    print(height)
+    print(width)
 
-    image = decode_jpeg(features['image/encoded'])
-    image_size = tf.concat([height, width], 0)
+    image_shape = ([height, width, 3])
+    annotation_shape = ([height, width, 1])
+
+    print(image_shape)
+
+    image = tf.decode_raw(features['image/encoded'], tf.uint8)
+    seg_gt= tf.decode_raw(features['image/seg_gt'], tf.uint8)
+
+    image = tf.reshape(image, image_shape)
+    seg_gt= tf.reshape(seg_gt, annotation_shape)
+
+    image_size = [height, width]
 
     if has_3d:
         pose = tf.cast(features['mosh/pose'], dtype=tf.float32)
@@ -94,9 +99,9 @@ def parse_example_proto(example_serialized, has_3d=False):
         gt3d = tf.reshape(
             tf.cast(features['mosh/gt3d'], dtype=tf.float32), [14, 3])
         has_smpl3d = tf.cast(features['meta/has_3d'], dtype=tf.bool)
-        return image, image_size, label, center, fname, pose, shape, gt3d, has_smpl3d
+        return image, segt_gt, image_size, label, center, fname, pose, shape, gt3d, has_smpl3d
     else:
-        return image, image_size, label, center, fname
+        return image, seg_gt, image_size, label, center, fname
 
 
 def rescale_image(image):
@@ -112,12 +117,19 @@ def rescale_image(image):
 
 def get_all_files(dataset_dir, datasets, split='train'):
     # Dataset with different name path
+    print('getting all files')
+    print(dataset_dir)
+    print(datasets)
+
     diff_name = ['h36m', 'mpi_inf_3dhp']
 
     data_dirs = [
-        join(dataset_dir, dataset, '%s_*.tfrecord' % split)
+        (dataset_dir+'/'+dataset+'.tfrecord')
         for dataset in datasets if dataset not in diff_name
     ]
+
+    print(data_dirs)
+
     if 'h36m' in datasets:
         data_dirs.append(
             join(dataset_dir, 'tf_records_human36m_wjoints', split,
@@ -130,7 +142,7 @@ def get_all_files(dataset_dir, datasets, split='train'):
     for data_dir in data_dirs:
         all_files += sorted(glob(data_dir))
 
-    return all_files
+    return data_dirs#all_files
 
 
 def read_smpl_data(filename_queue):
@@ -154,6 +166,7 @@ def read_smpl_data(filename_queue):
         shape = tf.cast(features['shape'], dtype=tf.float32)
 
         return pose, shape
+
 
 
 def decode_jpeg(image_buffer, name=None):
@@ -184,6 +197,7 @@ def jitter_center(center, trans_max):
 
 
 def jitter_scale(image, image_size, keypoints, center, scale_range):
+
     with tf.name_scope(None, 'jitter_scale', [image, image_size, keypoints]):
         scale_factor = tf.random_uniform(
             [1],
@@ -214,6 +228,8 @@ def pad_image_edge(image, margin):
     tf doesn't have edge repeat mode,, so doing it with tile
     Assumes image has 3 channels!!
     """
+    
+    num_channels = image.shape[2]
 
     def repeat_col(col, num_repeat):
         # col is N x 3, ravels
@@ -221,7 +237,7 @@ def pad_image_edge(image, margin):
         with tf.name_scope(None, 'repeat_col', [col, num_repeat]):
             return tf.reshape(
                 tf.tile(tf.reshape(col, [-1]), [num_repeat]),
-                [num_repeat, -1, 3])
+                [num_repeat, -1, num_channels])
 
     with tf.name_scope(None, 'pad_image_edge', [image, margin]):
         top = repeat_col(image[0, :, :], margin)
@@ -237,7 +253,7 @@ def pad_image_edge(image, margin):
         return image
 
 
-def random_flip(image, kp, pose=None, gt3d=None):
+def random_flip(image, seg_gt, kp, pose=None, gt3d=None):
     """
     mirrors image L/R and kp, also pose if supplied
     """
@@ -246,17 +262,17 @@ def random_flip(image, kp, pose=None, gt3d=None):
     mirror_cond = tf.less(uniform_random, .5)
 
     if pose is not None:
-        new_image, new_kp, new_pose, new_gt3d = tf.cond(
-            mirror_cond, lambda: flip_image(image, kp, pose, gt3d),
-            lambda: (image, kp, pose, gt3d))
-        return new_image, new_kp, new_pose, new_gt3d
+        new_image, new_gt, new_kp, new_pose, new_gt3d = tf.cond(
+            mirror_cond, lambda: flip_image(image, seg_gt, kp, pose, gt3d),
+            lambda: (image, seg_gt, kp, pose, gt3d))
+        return new_image, new_gt, new_kp, new_pose, new_gt3d
     else:
-        new_image, new_kp = tf.cond(mirror_cond, lambda: flip_image(image, kp),
-                                    lambda: (image, kp))
-        return new_image, new_kp
+        new_image, new_gt, new_kp = tf.cond(mirror_cond, lambda: flip_image(image, seg_gt, kp),
+                                    lambda: (image, seg_gt, kp))
+        return new_image, new_gt, new_kp
 
 
-def flip_image(image, kp, pose=None, gt3d=None):
+def flip_image(image, seg_gt, kp, pose=None, gt3d=None):
     """
     Flipping image and kp.
     kp is 3 x N!
@@ -264,6 +280,7 @@ def flip_image(image, kp, pose=None, gt3d=None):
     gt3d is 14 x 3
     """
     image = tf.reverse(image, [1])
+    seg_gt = tf.reverse(seg_gt, [1])
     new_kp = kp
 
     new_x = tf.cast(tf.shape(image)[0], dtype=kp.dtype) - kp[0, :] - 1
@@ -277,9 +294,9 @@ def flip_image(image, kp, pose=None, gt3d=None):
     if pose is not None:
         new_pose = reflect_pose(pose)
         new_gt3d = reflect_joints3d(gt3d)
-        return image, new_kp, new_pose, new_gt3d
+        return image, seg_gt, new_kp, new_pose, new_gt3d
     else:
-        return image, new_kp
+        return image, seg_gt, new_kp
 
 
 def reflect_pose(pose):
