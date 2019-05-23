@@ -29,6 +29,7 @@ import tensorflow as tf
 from src.util import renderer as vis_util
 from src.util import image as img_util
 from src.util import openpose as op_util
+from src.tf_smpl.projection import batch_orth_proj_idrot
 import src.config
 from src.RunModel import RunModel
 
@@ -38,12 +39,67 @@ flags.DEFINE_string(
     'If specified, uses the openpose output to crop the image.')
 
 
+def reproject_vertices(proc_param, verts, cam, im_size):
+    """
+    already works for COCO data
+    """
+    # im_size = img.shape[:2]
+    cam_ = tf.expand_dims(cam, 0)
+    verts_ = tf.expand_dims(verts, 0)
+    verts_projected = batch_orth_proj_idrot(tf.cast(verts_, tf.float32), tf.cast(cam_, tf.float32))
+    verts_projected = ((verts_projected + 1) * 0.5 * proc_param['scale']) * im_size  # proc_param['img_size'] instead of im_size?
+
+    img_size = proc_param['img_size']
+    margin = int(img_size / 2)
+    undo_scale = 1. / np.array(proc_param['scale'])
+    verts_original = (verts_projected + proc_param['start_pt'] - margin) * undo_scale
+
+    return verts_original # shape num_verts x 2
+
+def reproject_vertices_prototyping(proc_param, verts, cam, im_size):
+    """
+    TODO: adapt to all training data
+    """
+    # im_size = img.shape[:2]
+    cam_ = tf.expand_dims(cam, 0)
+    verts_ = tf.expand_dims(verts, 0)
+    verts_projected = batch_orth_proj_idrot(tf.cast(verts_, tf.float32), tf.cast(cam_, tf.float32))
+    verts_projected = ((verts_projected + 1) * 0.5 * proc_param['scale']) * proc_param['img_size']  # proc_param['img_size'] instead of im_size?
+
+    img_size = proc_param['img_size']
+    margin = int(img_size / 2)
+
+    margin = (np.array(im_size)/2).astype(int)
+    undo_scale = 1. / np.array(proc_param['scale'])
+    verts_original = (verts_projected + proc_param['start_pt'] - margin) * undo_scale
+
+    return verts_original # shape num_verts x 2
+
+def visualize_sil_reprojection(img, orig_img, proc_param, verts, cam, sess):
+    import matplotlib.pyplot as plt
+    implot = plt.imshow(img)
+    verts_orig = reproject_vertices_prototyping(proc_param, verts, cam, img.shape[:2])
+    print(verts_orig)
+    verts_pixel = tf.cast(verts_orig, tf.int32)
+    print(verts_pixel)
+    verts_pixel_np = np.unique(verts_pixel.eval(session=sess), axis=1)
+    print(verts_pixel_np.shape)
+    #plt.plot(verts_pixel[0, :, 0].eval(session=sess), verts_pixel[0, :, 1].eval(session=sess), 'b.')
+    plt.plot(verts_pixel_np[0, :, 0], verts_pixel_np[0, :, 1], 'b.')
+    plt.show()
+
+
 def visualize(img, proc_param, joints, verts, cam):
     """
     Renders the result in original image coordinate frame.
     """
     cam_for_render, vert_shifted, joints_orig = vis_util.get_original(
         proc_param, verts, cam, joints, img_size=img.shape[:2])
+
+    print("cam_for_render: ", cam_for_render)
+    print("vert_shifted: ", vert_shifted)
+    print("joints_orig: ", joints_orig)
+    print("image shape: ", img.shape)
 
     # Render results
     skel_img = vis_util.draw_skeleton(img, joints_orig)
@@ -119,7 +175,8 @@ def preprocess_image(img_path, json_path=None):
 def main(img_path, json_path=None):
     sess = tf.Session()
     model = RunModel(config, sess=sess)
-
+    import matplotlib.image as mpimg
+    original_img = mpimg.imread(img_path)
     input_img, proc_param, img = preprocess_image(img_path, json_path)
     # Add batch dimension: 1 x D x D x 3
     input_img = np.expand_dims(input_img, 0)
@@ -131,15 +188,16 @@ def main(img_path, json_path=None):
     joints, verts, cams, joints3d, theta = model.predict(
         input_img, get_theta=True)
 
-    visualize(img, proc_param, joints[0], verts[0], cams[0])
+    np.set_printoptions(threshold=sys.maxsize)
 
+    visualize(img, proc_param, joints[0], verts[0], cams[0])
+    #visualize_sil_reprojection(img, original_img, proc_param, verts[0], cams[0], sess)
 
 if __name__ == '__main__':
     config = flags.FLAGS
     config(sys.argv)
     # Using pre-trained model, change this to use your own.
     config.load_path = src.config.PRETRAINED_MODEL
-
     config.batch_size = 1
 
     renderer = vis_util.SMPLRenderer(face_path=config.smpl_face_path)

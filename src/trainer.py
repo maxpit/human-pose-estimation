@@ -29,6 +29,7 @@ import deepdish as dd
 # For drawing
 from .util import renderer as vis_util
 
+MESH_REPROJECTION_LOSS=False
 
 class HMRTrainer(object):
     def __init__(self, config, data_loader, mocap_loader):
