@@ -96,10 +96,10 @@ def visualize(img, proc_param, joints, verts, cam):
     cam_for_render, vert_shifted, joints_orig = vis_util.get_original(
         proc_param, verts, cam, joints, img_size=img.shape[:2])
 
-    print("cam_for_render: ", cam_for_render)
-    print("vert_shifted: ", vert_shifted)
-    print("joints_orig: ", joints_orig)
-    print("image shape: ", img.shape)
+    #print("cam_for_render: ", cam_for_render)
+    #print("vert_shifted: ", vert_shifted)
+    #print("joints_orig: ", joints_orig)
+    #print("image shape: ", img.shape)
 
     # Render results
     skel_img = vis_util.draw_skeleton(img, joints_orig)
