@@ -69,7 +69,7 @@ def _add_to_tfrecord(img_path, gt_path, label, writer, is_lsp_ext=False):
         'image/visibility': _int64_feature(label[2, :].astype(np.int)),
         'image/filename': _bytes_feature(tf.compat.as_bytes(basename(img_path))),
         'image/encoded': _bytes_feature(img_raw),
-        'image/gt_seg': _bytes_feature(gt_raw) 
+        'image/seg_gt': _bytes_feature(gt_raw) 
     }
     if add_face:
         # 3 x 5
