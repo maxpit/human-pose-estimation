@@ -71,11 +71,11 @@ flags.DEFINE_list('mocap_datasets', ['CMU', 'H3.6', 'jointLim'],
 
 # Model config
 flags.DEFINE_boolean(
-    'encoder_only', False,
+    'encoder_only', True,
     'if set, no adversarial prior is trained = monsters')
 
 flags.DEFINE_boolean(
-    'use_3d_label', True,
+    'use_3d_label', False,
     'Uses 3D labels if on.')
 
 # Hyper parameters:

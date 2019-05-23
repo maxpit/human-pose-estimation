@@ -15,6 +15,9 @@ from src.util import openpose as op_util
 from src.config import get_config, prepare_dirs, save_config
 from src.data_loader import DataLoader
 from src.RunModel import RunModel
+from src.util.load_data import example_run
+from src.trainer import HMRTrainer
+
 
 def main(config):
     prepare_dirs(config)
@@ -27,28 +30,12 @@ def main(config):
 
     print(image_loader)
 
-    #trainer = HMRTrainer(config, image_loader, smpl_loader)
+    trainer = HMRTrainer(config, image_loader)
     save_config(config)
-    #trainer.train()
-
-    images = image_loader['image']
-    gts = image_loader['seg_gt']
-
-    print(images)
-    print(gts)
-
-    import matplotlib.pyplot as plt
-    fig = plt.figure()
-    fig.add_subplot(1,2,1)
-    plt.imshow(images[0])
-    fig.add_subplot(1,2,2)
-    plt.imshow(gts[0])
-    plt.show()
-
+    trainer.train()
 
 if __name__ == '__main__':
     config = flags.FLAGS
     config(sys.argv)
-    config.batch_size = 1
-
+    config.batch_size = 10
     main(config)

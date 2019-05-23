@@ -19,6 +19,7 @@ _3D_DATASETS = ['h36m', 'up', 'mpi_inf_3dhp']
 
 def num_examples(datasets):
     _NUM_TRAIN = {
+        'lsp_few_new': 10,
         'lsp': 1000,
         'lsp_ext': 10000,
         'mpii': 20000,
@@ -51,6 +52,7 @@ class DataLoader(object):
         self.batch_size = config.batch_size
         self.data_format = config.data_format
         self.output_size = config.img_size
+        self.mocap_datasets = config.mocap_datasets
         # Jitter params:
         self.trans_max = config.trans_max
         self.scale_range = [config.scale_min, config.scale_max]
@@ -84,6 +86,7 @@ class DataLoader(object):
         pack_these = [image, seg_gt, label]
         pack_name = ['image', 'seg_gt', 'label']
 
+        
         all_batched = tf.train.shuffle_batch(
             pack_these,
             batch_size=self.batch_size,
@@ -92,9 +95,15 @@ class DataLoader(object):
             min_after_dequeue=min_after_dequeue,
             enqueue_many=False,
             name='input_batch_train')
+        
+        print('all_batched:', all_batched)
+
+
         batch_dict = {}
         for name, batch in zip(pack_name, all_batched):
             batch_dict[name] = batch
+
+        print(batch_dict)
 
         return batch_dict
 
