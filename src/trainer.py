@@ -16,6 +16,7 @@ from .models import Discriminator_separable_rotations, get_encoder_fn_separate
 from .tf_smpl.batch_lbs import batch_rodrigues
 from .tf_smpl.batch_smpl import SMPL
 from .tf_smpl.projection import batch_orth_proj_idrot
+from .tf_smpl.projection import reproject_vertices
 
 from tensorflow.python.ops import control_flow_ops
 
@@ -248,10 +249,10 @@ class HMRTrainer(object):
             # Rs_wglobal is Nx24x3x3 rotation matrices of poses
             verts, Js, pred_Rs = self.smpl(shapes, poses, get_skin=True)
             pred_kp = batch_orth_proj_idrot(
-                Js, cams, name='proj2d_stage%d' % i)
-            # --- Compute losses:
+                    Js, cams, name='proj2d_stage%d' % i)
+                # --- Compute losses:
             loss_kps.append(self.e_loss_weight * self.keypoint_loss(
-                self.kp_loader, pred_kp))
+                    self.kp_loader, pred_kp))
             pred_Rs = tf.reshape(pred_Rs, [-1, 24, 9])
             if self.use_3d_label:
                 loss_poseshape, loss_joints = self.get_3d_loss(
