@@ -31,7 +31,7 @@ from .util import renderer as vis_util
 
 
 class HMRTrainer(object):
-    def __init__(self, config, data_loader, mocap_loader):
+    def __init__(self, config, data_loader, mocap_loader = None):
         """
         Args:
           config
@@ -43,19 +43,30 @@ class HMRTrainer(object):
         """
         # Config + path
         self.config = config
+
         self.model_dir = config.model_dir
+        print('model dir: %s', self.model_dir)
         self.load_path = config.load_path
+        print('load path: %s', self.load_path)
 
         self.data_format = config.data_format
+        print('data_format: %s', self.data_format)
         self.smpl_model_path = config.smpl_model_path
+        print('smpl_model_path: %s', self.smpl_model_path)
         self.pretrained_model_path = config.pretrained_model_path
+        print('pretrained_model_path: %s', self.pretrained_model_path)
         self.encoder_only = config.encoder_only
+        print('encoder only:', self.encoder_only)
         self.use_3d_label = config.use_3d_label
+        print('use_3d_label:', self.use_3d_label)
 
         # Data size
         self.img_size = config.img_size
+        print('image_size:', self.img_size)
         self.num_stage = config.num_stage
+        print('num_stage:', self.num_stage)
         self.batch_size = config.batch_size
+        print('batch_size:', self.batch_size)
         self.max_epoch = config.epoch
 
         self.num_cam = 3
@@ -66,7 +77,9 @@ class HMRTrainer(object):
 
         # Data
         num_images = num_examples(config.datasets)
+        print('num_images: ', num_images)
         num_mocap = num_examples(config.mocap_datasets)
+        print('num_mocap', num_mocap)
 
         self.num_itr_per_epoch = num_images / self.batch_size
         self.num_mocap_itr_per_epoch = num_mocap / self.batch_size
@@ -78,7 +91,11 @@ class HMRTrainer(object):
                                                 [0, 3, 1, 2])
 
         self.image_loader = data_loader['image']
+        print('images', self.image_loader)
         self.kp_loader = data_loader['label']
+        print('kps', self.kp_loader)
+        self.seg_gt_loader = data_loader['seg_gt']
+        print('gts', self.seg_gt_loader)
 
         if self.use_3d_label:
             self.poseshape_loader = data_loader['label3d']
@@ -87,8 +104,8 @@ class HMRTrainer(object):
             self.has_gt3d_joints = data_loader['has3d'][:, 0]
             self.has_gt3d_smpl = data_loader['has3d'][:, 1]
 
-        self.pose_loader = mocap_loader[0]
-        self.shape_loader = mocap_loader[1]
+        #self.pose_loader = mocap_loader[0]
+        #self.shape_loader = mocap_loader[1]
 
         self.global_step = tf.Variable(0, name='global_step', trainable=False)
         self.log_img_step = config.log_img_step
@@ -528,13 +545,15 @@ class HMRTrainer(object):
             img_summary, global_step=result['step'])
 
     def train(self):
+        print('started training')
         # For rendering!
         self.renderer = vis_util.SMPLRenderer(
             img_size=self.img_size,
             face_path=self.config.smpl_face_path)
 
         step = 0
-
+        
+        print('...')
         with self.sv.managed_session(config=self.sess_config) as sess:
             while not self.sv.should_stop():
                 fetch_dict = {
@@ -545,18 +564,6 @@ class HMRTrainer(object):
                     "e_opt": self.e_opt,
                     "loss_kp": self.e_loss_kp
                 }
-                if not self.encoder_only:
-                    fetch_dict.update({
-                        # For D:
-                        "d_opt": self.d_opt,
-                        "d_loss": self.d_loss,
-                        "loss_disc": self.e_loss_disc,
-                    })
-                if self.use_3d_label:
-                    fetch_dict.update({
-                        "loss_3d_params": self.e_loss_3d,
-                        "loss_3d_joints": self.e_loss_3d_joints
-                    })
 
                 if step % self.log_img_step == 0:
                     fetch_dict.update({
@@ -566,12 +573,8 @@ class HMRTrainer(object):
                         "joints": self.all_pred_kps,
                         "cam": self.all_pred_cams,
                     })
-                    if not self.encoder_only:
-                        fetch_dict.update({
-                            "summary_occasional":
-                            self.summary_op_occ
-                        })
 
+                print(fetch_dict)
                 t0 = time()
                 result = sess.run(fetch_dict)
                 t1 = time()
