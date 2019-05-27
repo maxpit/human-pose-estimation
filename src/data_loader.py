@@ -76,36 +76,12 @@ class DataLoader(object):
 
         print(files)
 
-        fqueue = tf.train.string_input_producer(
-            files, shuffle=do_shuffle, name="input")
-        image, seg_gt, label = self.read_data(fqueue)
-        min_after_dequeue = 5000
-        num_threads = 8
-        capacity = min_after_dequeue + 3 * self.batch_size
-
-        pack_these = [image, seg_gt, label]
-        pack_name = ['image', 'seg_gt', 'label']
-
+        dataset = self.read_data(files)
+      
+        dataset = dataset.shuffle(buffer_size=10000)
+        dataset = dataset.batch(self.batch_size)
         
-        all_batched = tf.train.shuffle_batch(
-            pack_these,
-            batch_size=self.batch_size,
-            num_threads=num_threads,
-            capacity=capacity,
-            min_after_dequeue=min_after_dequeue,
-            enqueue_many=False,
-            name='input_batch_train')
-        
-        print('all_batched:', all_batched)
-
-
-        batch_dict = {}
-        for name, batch in zip(pack_name, all_batched):
-            batch_dict[name] = batch
-
-        print(batch_dict)
-
-        return batch_dict
+        return dataset 
 
     def get_smpl_loader(self):
         """
@@ -152,53 +128,14 @@ class DataLoader(object):
 
             return pose_batch, shape_batch
 
-    def read_and_decode(self, filename_queue):
-        with tf.name_scope(None, 'read_and_decode', [filename_queue]):
+    def read_data(self, filenames):
+        with tf.name_scope(None, 'read_data', filenames): 
+            dataset = tf.data.TFRecordDataset(filenames)
 
-            reader = tf.TFRecordReader()
+            dataset = dataset.map(data_utils.parse_example_proto)
+            dataset = dataset.map(self.image_preprocessing)
 
-            _, serialized_example = reader.read(filename_queue)
-
-            features = tf.parse_single_example(
-              serialized_example,
-              # Defaults are not specified since both keys are required.
-              features={
-                'height': tf.FixedLenFeature([], tf.int64),
-                'width': tf.FixedLenFeature([], tf.int64),
-                'image_raw': tf.FixedLenFeature([], tf.string),
-                'mask_raw': tf.FixedLenFeature([], tf.string)
-                })
-
-            # Convert from a scalar string tensor (whose single string has
-            # length mnist.IMAGE_PIXELS) to a uint8 tensor with shape
-            # [mnist.IMAGE_PIXELS].
-            image = tf.decode_raw(features['image_raw'], tf.uint8)
-            annotation = tf.decode_raw(features['mask_raw'], tf.uint8)
-            
-            height = tf.cast(features['height'], tf.int32)
-            width = tf.cast(features['width'], tf.int32)
-            
-            image_shape = ([height, width, 3])
-            annotation_shape = ([height, width, 1])
-            
-            image = tf.reshape(image, image_shape)
-            annotation = tf.reshape(annotation, annotation_shape)
-         
-            return image, annotation    
-    
-    def read_data(self, filename_queue):
-        with tf.name_scope(None, 'read_data', [filename_queue]):
-            reader = tf.TFRecordReader()
-            _, example_serialized = reader.read(filename_queue)
-            image, seg_gt,  image_size, label, center, fname = data_utils.parse_example_proto(
-                    example_serialized)
-            image, seg_gt, label = self.image_preprocessing(
-                    image, seg_gt, image_size, label, center)
-
-            # label should be K x 3
-            label = tf.transpose(label)
-
-            return image, seg_gt, label
+            return dataset 
 
     def image_preprocessing(self,
                             image,
@@ -206,8 +143,20 @@ class DataLoader(object):
                             image_size,
                             label,
                             center,
+                            fname,
                             pose=None,
                             gt3d=None):
+
+        print("preprocessing")
+        print("img:",image)
+        print("seg:",seg_gt)
+        print("size:",image_size)
+        print("label:",label)
+        print("center", center)
+        print("pose",pose)
+        print("gt3d:",gt3d)
+        print(" - ")
+
         margin = tf.to_int32(self.output_size / 2)
         with tf.name_scope(None, 'image_preprocessing',
                            [image, seg_gt, image_size, label, center]):
@@ -217,22 +166,24 @@ class DataLoader(object):
             # Randomly shift center.
             print('Using translation jitter: %d' % self.trans_max)
             center = data_utils.jitter_center(center, self.trans_max)
+            print("shifted center")
 
-
-            print(image)
             # randomly scale image.
             image, keypoints, center = data_utils.jitter_scale(
                 image, image_size, keypoints, center, self.scale_range)
+            print("scaled image")
 
-            print(seg_gt.shape)
+            print("seg prev:", seg_gt)
             seg_gt, _, _ = data_utils.jitter_scale(
                 seg_gt, image_size, keypoints, center, self.scale_range)
-            
+            print("scaled seg", seg_gt)
+
             # Pad image with safe margin.
             # Extra 50 for safety.
             margin_safe = margin + self.trans_max + 50
             image_pad = data_utils.pad_image_edge(image, margin_safe)
             seg_gt_pad =  data_utils.pad_image_edge(seg_gt, margin_safe)
+            print("padded img and seg", seg_gt_pad)
 
             center_pad = center + margin_safe
             keypoints_pad = keypoints + tf.to_float(margin_safe)
@@ -243,15 +194,20 @@ class DataLoader(object):
             start_pt = tf.squeeze(start_pt)
             bbox_begin = tf.stack([start_pt[1], start_pt[0], 0])
             bbox_size = tf.stack([self.output_size, self.output_size, 3])
+            bbox_size_gt = tf.stack([self.output_size, self.output_size, 1])
 
             crop = tf.slice(image_pad, bbox_begin, bbox_size)
-            crop_gt = tf.slice(seg_gt_pad, bbox_begin, bbox_size)
+            crop_gt = tf.slice(seg_gt_pad, bbox_begin, bbox_size_gt)
             x_crop = keypoints_pad[0, :] - tf.to_float(start_pt[0])
             y_crop = keypoints_pad[1, :] - tf.to_float(start_pt[1])
 
             crop_kp = tf.stack([x_crop, y_crop, visibility])
 
-            if pose is not None:
+            print("before random flip")
+            print("crop", crop)
+            print("crop_gt", crop_gt)
+            print("crop_kp", crop_kp)
+            if pose is not None and gt3d is not None:
                 crop, crop_gt, crop_kp, new_pose, new_gt3d = data_utils.random_flip(
                     crop, crop_gt, crop_kp, pose, gt3d)
             else:
@@ -267,8 +223,10 @@ class DataLoader(object):
             final_label = final_vis * final_label
 
             # rescale image from [0, 1] to [-1, 1]
-            crop = self.image_normalizing_fn(crop)
-            if pose is not None:
+            
+            
+            ##crop = self.image_normalizing_fn(crop)
+            if pose is not None and gt3d is not None:
                 return crop, crop_gt, final_label, new_pose, new_gt3d
             else:
                 return crop, crop_gt, final_label

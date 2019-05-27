@@ -85,9 +85,9 @@ def parse_example_proto(example_serialized, has_3d=False):
 
     print(image_shape)
 
-    image = tf.decode_raw(features['image/encoded'], tf.uint8)
-    seg_gt= tf.decode_raw(features['image/seg_gt'], tf.uint8)
-
+    image = decode_jpeg(features['image/encoded'],3)
+    seg_gt= decode_jpeg(features['image/seg_gt'],1)
+      
     image = tf.reshape(image, image_shape)
     seg_gt= tf.reshape(seg_gt, annotation_shape)
 
@@ -124,7 +124,7 @@ def get_all_files(dataset_dir, datasets, split='train'):
     diff_name = ['h36m', 'mpi_inf_3dhp']
 
     data_dirs = [
-        (dataset_dir+'/'+dataset+'.tfrecord')
+        (dataset_dir+'/'+dataset+'.tfrecords')
         for dataset in datasets if dataset not in diff_name
     ]
 
@@ -133,10 +133,10 @@ def get_all_files(dataset_dir, datasets, split='train'):
     if 'h36m' in datasets:
         data_dirs.append(
             join(dataset_dir, 'tf_records_human36m_wjoints', split,
-                 '*.tfrecord'))
+                 '*.tfrecords'))
     if 'mpi_inf_3dhp' in datasets:
         data_dirs.append(
-            join(dataset_dir, 'mpi_inf_3dhp', split, '*.tfrecord'))
+            join(dataset_dir, 'mpi_inf_3dhp', split, '*.tfrecords'))
 
     all_files = []
     for data_dir in data_dirs:
@@ -169,7 +169,7 @@ def read_smpl_data(filename_queue):
 
 
 
-def decode_jpeg(image_buffer, name=None):
+def decode_jpeg(image_buffer, ch,  name=None):
     """Decode a JPEG string into one 3-D float image Tensor.
       Args:
         image_buffer: scalar string Tensor.
@@ -182,7 +182,7 @@ def decode_jpeg(image_buffer, name=None):
         # Note that the resulting image contains an unknown height and width
         # that is set dynamically by decode_jpeg. In other words, the height
         # and width of image is unknown at compile-time.
-        image = tf.image.decode_jpeg(image_buffer, channels=3)
+        image = tf.image.decode_jpeg(image_buffer, channels=ch)
 
         # convert to [0, 1].
         image = tf.image.convert_image_dtype(image, dtype=tf.float32)
@@ -261,7 +261,7 @@ def random_flip(image, seg_gt, kp, pose=None, gt3d=None):
     uniform_random = tf.random_uniform([], 0, 1.0)
     mirror_cond = tf.less(uniform_random, .5)
 
-    if pose is not None:
+    if pose is not None and gt3d is not None:
         new_image, new_gt, new_kp, new_pose, new_gt3d = tf.cond(
             mirror_cond, lambda: flip_image(image, seg_gt, kp, pose, gt3d),
             lambda: (image, seg_gt, kp, pose, gt3d))
@@ -291,7 +291,7 @@ def flip_image(image, seg_gt, kp, pose=None, gt3d=None):
         [5, 4, 3, 2, 1, 0, 11, 10, 9, 8, 7, 6, 12, 13, 14, 16, 15, 18, 17])
     new_kp = tf.transpose(tf.gather(tf.transpose(new_kp), swap_inds))
 
-    if pose is not None:
+    if pose is not None and gt3d is not None:
         new_pose = reflect_pose(pose)
         new_gt3d = reflect_joints3d(gt3d)
         return image, seg_gt, new_kp, new_pose, new_gt3d
