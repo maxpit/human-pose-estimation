@@ -196,7 +196,7 @@ def jitter_center(center, trans_max):
         return center + rand_trans
 
 
-def jitter_scale(image, image_size, keypoints, center, scale_range):
+def jitter_scale(image, seg_gt, image_size, keypoints, center, scale_range):
 
     with tf.name_scope(None, 'jitter_scale', [image, image_size, keypoints]):
         scale_factor = tf.random_uniform(
@@ -206,6 +206,7 @@ def jitter_scale(image, image_size, keypoints, center, scale_range):
             dtype=tf.float32)
         new_size = tf.to_int32(tf.to_float(image_size) * scale_factor)
         new_image = tf.image.resize_images(image, new_size)
+        new_seg_gt = tf.image.resize_images(seg_gt, new_size)
 
         # This is [height, width] -> [y, x] -> [col, row]
         actual_factor = tf.to_float(
@@ -216,7 +217,7 @@ def jitter_scale(image, image_size, keypoints, center, scale_range):
         cx = tf.cast(center[0], actual_factor.dtype) * actual_factor[1]
         cy = tf.cast(center[1], actual_factor.dtype) * actual_factor[0]
 
-        return new_image, tf.stack([x, y]), tf.cast(
+        return new_image, new_seg_gt, tf.stack([x, y]), tf.cast(
             tf.stack([cx, cy]), tf.int32)
 
 

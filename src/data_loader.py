@@ -169,14 +169,9 @@ class DataLoader(object):
             print("shifted center")
 
             # randomly scale image.
-            image, keypoints, center = data_utils.jitter_scale(
-                image, image_size, keypoints, center, self.scale_range)
+            image, seg_gt, keypoints, center = data_utils.jitter_scale(
+                image, seg_gt, image_size, keypoints, center, self.scale_range)
             print("scaled image")
-
-            print("seg prev:", seg_gt)
-            seg_gt, _, _ = data_utils.jitter_scale(
-                seg_gt, image_size, keypoints, center, self.scale_range)
-            print("scaled seg", seg_gt)
 
             # Pad image with safe margin.
             # Extra 50 for safety.
