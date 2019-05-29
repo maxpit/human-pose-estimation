@@ -459,7 +459,7 @@ def draw_text(input_image, content):
         input_is_float = True
         image = (image * 255).astype(np.uint8)
 
-    black = np.array([0, 0, 0])
+    black = (0, 0, 0)
     margin = 15
     start_x = 5
     start_y = margin

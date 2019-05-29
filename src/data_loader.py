@@ -20,6 +20,7 @@ _3D_DATASETS = ['h36m', 'up', 'mpi_inf_3dhp']
 def num_examples(datasets):
     _NUM_TRAIN = {
         'lsp_few_new': 10,
+        'lsp_few_new_1': 10,
         'lsp': 1000,
         'lsp_ext': 10000,
         'mpii': 20000,
@@ -216,11 +217,12 @@ class DataLoader(object):
             ])
             # Preserving non_vis to be 0.
             final_label = final_vis * final_label
-
+            
+            final_label = tf.transpose(final_label)
             # rescale image from [0, 1] to [-1, 1]
             
             
-            ##crop = self.image_normalizing_fn(crop)
+            crop = self.image_normalizing_fn(crop)
             if pose is not None and gt3d is not None:
                 return crop, crop_gt, final_label, new_pose, new_gt3d
             else:

@@ -30,53 +30,54 @@ def main(config):
         dataset = data_loader.load()
         #smpl_loader = data_loader.get_smpl_loader()
 
-    #trainer = HMRTrainer(config, image_loader)
-    #save_config(config)
-    #trainer.train()
-    
-    num_epochs = 2
+   
+    num_epochs = 100  
     
     dataset = dataset.repeat(num_epochs)
-    iterator = dataset.make_one_shot_iterator()
+#    iterator = dataset.make_one_shot_iterator()
 
-    next_element = iterator.get_next()
+#    next_element = iterator.get_next()
     
     # The op for initializing the variables.
-    init_op = tf.group(tf.global_variables_initializer(),
-                       tf.local_variables_initializer())
+#    init_op = tf.group(tf.global_variables_initializer(),
+#                       tf.local_variables_initializer())
     
-    with tf.Session()  as sess:
-
-        sess.run(init_op)
-
-        coord = tf.train.Coordinator()
-        threads = tf.train.start_queue_runners(coord=coord)
-        
-        for _ in range(num_epochs):
-            while True:
-                try:
-                    img, seg_gt, label = sess.run(next_element)
-                    plt.figure(figsize=(8,8))
-
-                    #for i in range (config.batch_size):
-                    plt.subplot(2,2,1)
-                    plt.imshow(img[0])
-
-                    plt.subplot(2,2,2)
-                    plt.imshow(seg_gt[0].squeeze())
-                    plt.subplot(2,2,3)
-                    plt.imshow(img[1])
-
-                    plt.subplot(2,2,4)
-                    plt.imshow(seg_gt[1].squeeze())
-                        
-                    plt.show()
-                except tf.errors.OutOfRangeError:
-                    break
-
-        coord.request_stop()
-        coord.join(threads)
-
+#    with tf.Session()  as sess:
+#
+#        sess.run(init_op)
+#
+#        coord = tf.train.Coordinator()
+#        threads = tf.train.start_queue_runners(coord=coord)
+#        
+#        for _ in range(num_epochs):
+#            while True:
+#                try:
+#                    img, seg_gt, label = sess.run(next_element)
+#                    plt.figure(figsize=(8,8))
+#
+#                    #for i in range (config.batch_size):
+#                    plt.subplot(2,2,1)
+#                    plt.imshow(img[0])
+#
+#                    plt.subplot(2,2,2)
+#                    plt.imshow(seg_gt[0].squeeze())
+#                    plt.subplot(2,2,3)
+#                    plt.imshow(img[1])
+#
+#                    plt.subplot(2,2,4)
+#                    plt.imshow(seg_gt[1].squeeze())
+#                        
+#                    plt.show()
+#                except tf.errors.OutOfRangeError:
+#                    break
+#
+#        coord.request_stop()
+#        coord.join(threads)
+ 
+    trainer = HMRTrainer(config, dataset)
+    save_config(config)
+    trainer.train()
+ 
 if __name__ == '__main__':
     config = flags.FLAGS
     config(sys.argv)

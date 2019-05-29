@@ -65,7 +65,7 @@ def parse_example_proto(example_serialized, has_3d=False):
     width = tf.cast(features['image/width'], tf.int32)
     center = tf.cast(features['image/center'], tf.int32)
     fname = tf.cast(features['image/filename'], tf.string)
-    fname = tf.Print(fname, [fname], message="image name: ")
+    #fname = tf.Print(fname, [fname], message="image name: ")
 
     face_pts = tf.reshape(
         tf.cast(features['image/face_pts'], dtype=tf.float32), [3, 5])

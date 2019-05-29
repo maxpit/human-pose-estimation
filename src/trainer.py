@@ -32,7 +32,7 @@ from .util import renderer as vis_util
 MESH_REPROJECTION_LOSS=False
 
 class HMRTrainer(object):
-    def __init__(self, config, data_loader, mocap_loader = None):
+    def __init__(self, config, dataset, mocap_loader = None):
         """
         Args:
           config
@@ -85,25 +85,30 @@ class HMRTrainer(object):
         self.num_itr_per_epoch = num_images / self.batch_size
         self.num_mocap_itr_per_epoch = num_mocap / self.batch_size
 
+
+        iterator = dataset.make_one_shot_iterator()
+
+        self.image, self.seg_gt, self.kp_gt = iterator.get_next()
+
         # First make sure data_format is right
-        if self.data_format == 'NCHW':
-            # B x H x W x 3 --> B x 3 x H x W
-            data_loader['image'] = tf.transpose(data_loader['image'],
-                                                [0, 3, 1, 2])
-
-        self.image_loader = data_loader['image']
-        print('images', self.image_loader)
-        self.kp_loader = data_loader['label']
-        print('kps', self.kp_loader)
-        self.seg_gt_loader = data_loader['seg_gt']
-        print('gts', self.seg_gt_loader)
-
-        if self.use_3d_label:
-            self.poseshape_loader = data_loader['label3d']
-            # image_loader[3] is N x 2, first column is 3D_joints gt existence,
-            # second column is 3D_smpl gt existence
-            self.has_gt3d_joints = data_loader['has3d'][:, 0]
-            self.has_gt3d_smpl = data_loader['has3d'][:, 1]
+#        if self.data_format == 'NCHW':
+#            # B x H x W x 3 --> B x 3 x H x W
+#            data_loader['image'] = tf.transpose(data_loader['image'],
+#                                                [0, 3, 1, 2])
+#        
+#        self.image_loader = data_loader['image']
+#        print('images', self.image_loader)
+#        self.kp_loader = data_loader['label']
+#        print('kps', self.kp_loader)
+#        self.seg_gt_loader = data_loader['seg_gt']
+#        print('gts', self.seg_gt_loader)
+#
+#        if self.use_3d_label:
+#            self.poseshape_loader = data_loader['label3d']
+#            # image_loader[3] is N x 2, first column is 3D_joints gt existence,
+#            # second column is 3D_smpl gt existence
+#            self.has_gt3d_joints = data_loader['has3d'][:, 0]
+#            self.has_gt3d_smpl = data_loader['has3d'][:, 1]
 
         #self.pose_loader = mocap_loader[0]
         #self.shape_loader = mocap_loader[1]
@@ -163,14 +168,10 @@ class HMRTrainer(object):
 
             init_fn = load_pretrain
 
-        self.saver = tf.train.Saver(keep_checkpoint_every_n_hours=5)
         self.summary_writer = tf.summary.FileWriter(self.model_dir)
-        self.sv = tf.train.Supervisor(
-            logdir=self.model_dir,
-            global_step=self.global_step,
-            saver=self.saver,
-            summary_writer=self.summary_writer,
-            init_fn=init_fn)
+        self.sv = tf.train.MonitoredTrainingSession(
+            summary_dir=self.model_dir,
+            )
         gpu_options = tf.GPUOptions(allow_growth=True)
         self.sess_config = tf.ConfigProto(
             allow_soft_placement=False,
@@ -222,7 +223,7 @@ class HMRTrainer(object):
         img_enc_fn, threed_enc_fn = get_encoder_fn_separate(self.model_type)
         # Extract image features.
         self.img_feat, self.E_var = img_enc_fn(
-            self.image_loader, weight_decay=self.e_wd, reuse=False)
+            self.image, weight_decay=self.e_wd, reuse=False)
 
         loss_kps = []
         if self.use_3d_label:
@@ -268,7 +269,7 @@ class HMRTrainer(object):
                 Js, cams, name='proj2d_stage%d' % i)
             # --- Compute losses:
             loss_kps.append(self.e_loss_weight * self.keypoint_loss(
-                self.kp_loader, pred_kp))
+                self.kp_gt, pred_kp))
             pred_Rs = tf.reshape(pred_Rs, [-1, 24, 9])
             if self.use_3d_label:
                 loss_poseshape, loss_joints = self.get_3d_loss(
@@ -317,8 +318,8 @@ class HMRTrainer(object):
         self.all_verts = tf.stack(self.all_verts, axis=1)
         self.all_pred_kps = tf.stack(self.all_pred_kps, axis=1)
         self.all_pred_cams = tf.stack(self.all_pred_cams, axis=1)
-        self.show_imgs = tf.gather(self.image_loader, self.show_these)
-        self.show_kps = tf.gather(self.kp_loader, self.show_these)
+        self.show_imgs = tf.gather(self.image, self.show_these)
+        self.show_kps = tf.gather(self.kp_gt, self.show_these)
 
         # Don't forget to update batchnorm's moving means.
         print('collecting batch norm moving means!!')
@@ -476,6 +477,9 @@ class HMRTrainer(object):
         Renderer is an instance of SMPLRenderer.
         """
         gt_vis = gt_kp[:, 2].astype(bool)
+        print("gt_kp",gt_kp.shape)
+        print("pred_kp",pred_kp.shape)
+        print(gt_vis)
         loss = np.sum((gt_kp[gt_vis, :2] - pred_kp[gt_vis])**2)
         debug_text = {"sc": cam[0], "tx": cam[1], "ty": cam[2], "kpl": loss}
         # Fix a flength so i can render this with persp correct scale
@@ -504,7 +508,7 @@ class HMRTrainer(object):
         return combined
 
     def draw_results(self, result):
-        from StringIO import StringIO
+        import io
         import matplotlib.pyplot as plt
 
         # This is B x H x W x 3
@@ -532,8 +536,11 @@ class HMRTrainer(object):
                 all_rend_imgs.append(rend_img)
             combined = np.vstack(all_rend_imgs)
 
-            sio = StringIO()
+            sio = io.BytesIO()
+            
             plt.imsave(sio, combined, format='png')
+            sio.seek(0)
+
             vis_sum = tf.Summary.Image(
                 encoded_image_string=sio.getvalue(),
                 height=combined.shape[0],
@@ -555,7 +562,7 @@ class HMRTrainer(object):
         step = 0
         
         print('...')
-        with self.sv.managed_session(config=self.sess_config) as sess:
+        with self.sv as sess:
             while not self.sv.should_stop():
                 fetch_dict = {
                     "summary": self.summary_op_always,
@@ -575,7 +582,6 @@ class HMRTrainer(object):
                         "cam": self.all_pred_cams,
                     })
 
-                print(fetch_dict)
                 t0 = time()
                 result = sess.run(fetch_dict)
                 t1 = time()
@@ -604,8 +610,8 @@ class HMRTrainer(object):
                     self.draw_results(result)
 
                 self.summary_writer.flush()
-                if epoch > self.max_epoch:
-                    self.sv.request_stop()
+                #if epoch > self.max_epoch:
+                #    self.sv.request_stop()
 
                 step += 1
 
