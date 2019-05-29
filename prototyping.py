@@ -1,7 +1,7 @@
 """
 Demo of HMR.
 
-Note that HMR requires the bounding box of the person in the image. The best performance is obtained when max length of the person in the image is roughly 150px. 
+Note that HMR requires the bounding box of the person in the image. The best performance is obtained when max length of the person in the image is roughly 150px.
 
 When only the image path is supplied, it assumes that the image is centered on a person whose length is roughly 150px.
 Alternatively, you can supply output of the openpose to figure out the bbox and the right scale factor.
@@ -114,11 +114,12 @@ def reproject_vertices_prototyping(proc_param, verts, cam, im_size):
     scale = proc_param['scale']
     img_size = proc_param['img_size']
     # im_size = img.shape[:2]
-    cam_ = tf.expand_dims(cam, 0)
-    print("cam after expand: ", cam_)
-    verts_ = tf.expand_dims(verts, 0)
-    verts_projected = batch_orth_proj_idrot(tf.cast(verts_, tf.float32), tf.cast(cam_, tf.float32))
-    scale_prototyping = np.array([1.9649, scale])
+    #cam_ = tf.expand_dims(cam, 0)
+    #print("cam after expand: ", cam_)
+    #verts_ = tf.expand_dims(verts, 0)
+    verts_projected = batch_orth_proj_idrot(tf.cast(verts, tf.float32), tf.cast(cam, tf.float32))
+    print("shape verts_projected: ", verts_projected)
+    #scale_prototyping = np.array([1.9649, scale])
     verts_projected = ((verts_projected+1)* 0.5 ) * img_size  # proc_param['img_size'] instead of im_size?
 
 
@@ -127,7 +128,7 @@ def reproject_vertices_prototyping(proc_param, verts, cam, im_size):
     margin = (np.array(im_size)/2).astype(int)
     undo_scale = 1. / np.array(proc_param['scale'])
 
-    verts_original = (verts_projected + proc_param['start_pt'] - margin) / scale_prototyping
+    #verts_original = (verts_projected + proc_param['start_pt'] - margin) / scale_prototyping
 
   #  return verts_original # shape num_verts x 2
     return verts_projected
@@ -139,17 +140,33 @@ def visualize_sil_reprojection(img, orig_img, proc_param, verts, cam, sess):
     #im_silhouette = mpimg.imread('data/cropped_3_gt.jpg')
     #print(im_silhouette.shape)
     #im_silhouette = np.floor(im_silhouette)
-    img_vis = ((img * 0.5) + 0.5) * 255
-    implot = plt.imshow(img_vis)
-    verts_orig = reproject_vertices_prototyping(proc_param, verts, cam, img.shape[:2])
-    #print(verts_orig)
-    #verts_pixel = tf.cast(verts_orig, tf.int32)
+    img_vis_0 = ((img[0] * 0.5) + 0.5) * 255
+    img_vis_1 = ((img[1] * 0.5) + 0.5) * 255
+    img_vis_2 = ((img[2] * 0.5) + 0.5) * 255
+    verts_orig = reproject_vertices_prototyping(proc_param, verts, cam, img.shape[1:2])
+    # print(verts_orig)
+    # verts_pixel = tf.cast(verts_orig, tf.int32)
     verts_pixel = verts_orig
+    #print(img_vis)
+    #print(img_vis.shape)
+    plt.figure(1)
+    plt.subplot(211)
+    plt.imshow(img_vis_0.astype(int))
     #print(verts_pixel)
     #verts_pixel_np = np.unique(verts_pixel.eval(session=sess), axis=1)
     #print(verts_pixel_np.shape)
     plt.plot(verts_pixel[0, :, 0].eval(session=sess), verts_pixel[0, :, 1].eval(session=sess), 'bs', markersize=0.1)
     #plt.plot(verts_pixel_np[0, :, 0], verts_pixel_np[0, :, 1], 'bs')
+
+    plt.subplot(212)
+    plt.imshow(img_vis_1.astype(int))
+    plt.plot(verts_pixel[1, :, 0].eval(session=sess), verts_pixel[1, :, 1].eval(session=sess), 'bs', markersize=0.1)
+
+    #plt.subplot(213)
+    #plt.imshow(img_vis_2.astype(int))
+    #plt.plot(verts_pixel[2, :, 0].eval(session=sess), verts_pixel[2, :, 1].eval(session=sess), 'bs', markersize=0.1)
+
+
     plt.show()
 
 
@@ -250,25 +267,39 @@ def main(img_path, json_path=None):
     import matplotlib.image as mpimg
 
 
-    #for i in range(3):
-    original_img = mpimg.imread(img_path)
-    #original_img = mpimg.imread('data/coco%i', i,'.png')
-    input_img, proc_param, img = preprocess_image(img_path, json_path)
-    input_img_for_vis = input_img
-    # Add batch dimension: 1 x D x D x 3
-    input_img = np.expand_dims(input_img, 0)
+    for i in range(1, 4):
+    #original_img = mpimg.imread(img_path)
+        path = 'data/coco{}.png'.format(i)
+        original_img = mpimg.imread(path)
+        input_img, proc_param, img = preprocess_image(path, json_path)
+        input_img_for_vis = input_img
+        # Add batch dimension: 1 x D x D x 3
+        if(i==1):
+            input_imgs = np.expand_dims(input_img, 0)
+        else:
+            input_imgs = np.append(input_imgs, np.expand_dims(input_img, 0), axis=0)
+    print("input_imgs.shape: ", input_imgs.shape)
 
+    for i in range(3):
     # Theta is the 85D vector holding [camera, pose, shape]
     # where camera is 3D [s, tx, ty]
     # pose is 72D vector holding the rotation of 24 joints of SMPL in axis angle format
     # shape is 10D shape coefficients of SMPL
-    joints, verts, cams, joints3d, theta = model.predict(
-        input_img, get_theta=True)
+        joints, verts, cams, joints3d, theta = model.predict(
+            np.expand_dims(input_imgs[i], 0), get_theta=True)
+        if(i == 0):
+            #verts_all = tf.expand_dims(verts, 0)
+            #cams_all = tf.expand_dims(cams, 0)
+            verts_all = verts
+            cams_all = cams
+        else:
+            verts_all = tf.concat([verts_all, verts], axis=0)
+            cams_all = tf.concat([cams_all, cams], axis=0)
     #print("input img: ", input_img.shape)
-    np.set_printoptions(threshold=sys.maxsize)
+    #np.set_printoptions(threshold=sys.maxsize)
 
-    visualize(img, proc_param, joints[0], verts[0], cams[0])
-    #visualize_sil_reprojection(input_img_for_vis, original_img, proc_param, verts[0], cams[0], sess)
+    #visualize(img, proc_param, joints[0], verts[0], cams[0])
+    visualize_sil_reprojection(input_imgs, original_img, proc_param, verts_all, cams_all, sess)
 
 if __name__ == '__main__':
     config = flags.FLAGS
