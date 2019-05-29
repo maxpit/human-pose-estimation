@@ -4,3 +4,7 @@ logs*/
 *.DS_Store
 *.pyc
 forrelease.sh
+data/
+*.bk
+.ipynb_checkpoints/
+*.ipynb
