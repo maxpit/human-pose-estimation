@@ -1,13 +1,9 @@
- - data loader
-	- create dataset with joints (Valentin)
-	- adapt pipeline so that single data can be loaded and trained on (Valentin)
-
  - reprojection loss
 	- backpropagation testen (Max)
 	- n2h: timing difference (Max)
 
  - reprojection
-	- use tf_smpl/projection.py with all points instead of just keypoints (probably slow)  
+	- use tf_smpl/projection.py with all points instead of just keypoints (probably slow) (Max)  
 
  - integration data loader and reprojection loss in existing pipeline
 	- add reprojection loss to ops.py
