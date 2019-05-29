@@ -89,12 +89,17 @@ class HMRTrainer(object):
 
         iterator = dataset.make_one_shot_iterator()
 
+        # Formats
+        # image: B x H x W x 3
+        # seg_gt: B x H x W x 3
+        # kp_gt: B x 19 x 3
         self.image, self.seg_gt, self.kp_gt = iterator.get_next()
 
         # First make sure data_format is right
         if self.data_format == 'NCHW':
             # B x H x W x 3 --> B x 3 x H x W
             self.image = tf.transpose(self.image, [0, 3, 1, 2])
+            self.seg_gt = tf.transpose(self.seg_gt, [0, 3, 1, 2])
         
 #        if self.use_3d_label:
 #            self.poseshape_loader = data_loader['label3d']
