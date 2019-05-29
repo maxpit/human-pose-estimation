@@ -92,18 +92,10 @@ class HMRTrainer(object):
         self.image, self.seg_gt, self.kp_gt = iterator.get_next()
 
         # First make sure data_format is right
-#        if self.data_format == 'NCHW':
-#            # B x H x W x 3 --> B x 3 x H x W
-#            data_loader['image'] = tf.transpose(data_loader['image'],
-#                                                [0, 3, 1, 2])
-#        
-#        self.image_loader = data_loader['image']
-#        print('images', self.image_loader)
-#        self.kp_loader = data_loader['label']
-#        print('kps', self.kp_loader)
-#        self.seg_gt_loader = data_loader['seg_gt']
-#        print('gts', self.seg_gt_loader)
-#
+        if self.data_format == 'NCHW':
+            # B x H x W x 3 --> B x 3 x H x W
+            self.image = tf.transpose(self.image, [0, 3, 1, 2])
+        
 #        if self.use_3d_label:
 #            self.poseshape_loader = data_loader['label3d']
 #            # image_loader[3] is N x 2, first column is 3D_joints gt existence,
