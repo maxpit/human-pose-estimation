@@ -270,7 +270,7 @@ class HMRTrainer(object):
                     Js, cams, name='proj2d_stage%d' % i)
                 # --- Compute losses:
             loss_kps.append(self.e_loss_weight * self.keypoint_loss(
-                    self.kp_loader, pred_kp))
+                    self.kp_gt, pred_kp))
 
             pred_Rs = tf.reshape(pred_Rs, [-1, 24, 9])
             if self.use_3d_label:
