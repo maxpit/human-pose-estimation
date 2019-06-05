@@ -122,7 +122,6 @@ def reproject_vertices_prototyping(proc_param, verts, cam, im_size):
     #scale_prototyping = np.array([1.9649, scale])
     verts_projected = ((verts_projected+1)* 0.5 ) * img_size  # proc_param['img_size'] instead of im_size?
 
-
     margin = int(img_size / 2)
 
     margin = (np.array(im_size)/2).astype(int)
@@ -295,6 +294,8 @@ def main(img_path, json_path=None):
         else:
             verts_all = tf.concat([verts_all, verts], axis=0)
             cams_all = tf.concat([cams_all, cams], axis=0)
+    print("verts_all shape: ", verts_all)
+    print("cams_all shape: ", cams_all)
     #print("input img: ", input_img.shape)
     #np.set_printoptions(threshold=sys.maxsize)
 

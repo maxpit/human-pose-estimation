@@ -10,7 +10,7 @@ from __future__ import print_function
 
 from .data_loader import num_examples
 
-from .ops import keypoint_l1_loss, compute_3d_loss, align_by_pelvis
+from .ops import keypoint_l1_loss, compute_3d_loss, align_by_pelvis, mesh_reprojection_loss
 from .models import Discriminator_separable_rotations, get_encoder_fn_separate
 
 from .tf_smpl.batch_lbs import batch_rodrigues
@@ -29,6 +29,7 @@ import deepdish as dd
 
 # For drawing
 from .util import renderer as vis_util
+from .util.data_utils import get_silhouette_from_seg_im as get_sil
 
 MESH_REPROJECTION_LOSS=False
 
@@ -91,7 +92,7 @@ class HMRTrainer(object):
 
         # Formats
         # image: B x H x W x 3
-        # seg_gt: B x H x W x 3
+        # seg_gt: B x H x W x 1
         # kp_gt: B x 19 x 3
         self.image, self.seg_gt, self.kp_gt = iterator.get_next()
 
@@ -117,6 +118,10 @@ class HMRTrainer(object):
         # For visualization:
         num2show = np.minimum(6, self.batch_size)
         # Take half from front & back
+        print("batch size: ", self.batch_size)
+        print("array: ", np.arange(num2show / 2), "...", self.batch_size - np.arange(3) - 1)
+        print("np_stack: ", np.hstack(
+            [np.arange(num2show / 2), self.batch_size - np.arange(3) - 1]))
         self.show_these = tf.constant(
             np.hstack(
                 [np.arange(num2show / 2), self.batch_size - np.arange(3) - 1]),
@@ -125,6 +130,7 @@ class HMRTrainer(object):
         # Model spec
         self.model_type = config.model_type
         self.keypoint_loss = keypoint_l1_loss
+        self.mesh_repro_loss = mesh_reprojection_loss
 
         # Optimizer, learning rate
         self.e_lr = config.e_lr
@@ -266,8 +272,15 @@ class HMRTrainer(object):
             pred_kp = batch_orth_proj_idrot(
                     Js, cams, name='proj2d_stage%d' % i)
                 # --- Compute losses:
-            loss_kps.append(self.e_loss_weight * self.keypoint_loss(
-                    self.kp_gt, pred_kp))
+
+            if(not MESH_REPROJECTION_LOSS):
+                loss_kps.append(self.e_loss_weight * self.keypoint_loss(
+                        self.kp_gt, pred_kp))
+            else:
+                silhouette_gt = get_sil(self.seg_gt)
+                silhouette_pred = reproject_vertices(verts, cams, self.image.shape[2:])
+                loss_kps.append(self.e_loss_weight * self.mesh_repro_loss(
+                    silhouette_gt, silhouette_pred))
 
             pred_Rs = tf.reshape(pred_Rs, [-1, 24, 9])
             if self.use_3d_label:

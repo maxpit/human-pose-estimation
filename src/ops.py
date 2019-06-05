@@ -7,6 +7,7 @@ from __future__ import division
 from __future__ import print_function
 
 import tensorflow as tf
+from sklearn.neighbors import NearestNeighbors
 
 
 def keypoint_l1_loss(kp_gt, kp_pred, scale=1., name=None):
@@ -58,3 +59,44 @@ def align_by_pelvis(joints):
         right_id = 2
         pelvis = (joints[:, left_id, :] + joints[:, right_id, :]) / 2.
         return joints - tf.expand_dims(pelvis, axis=1)
+
+def bidirectional_dist(A, B):
+    # get nearest neighbors B of A
+    #if (A = tenso)
+    nbrs_B = NearestNeighbors(n_neighbors=1, algorithm='ball_tree').fit(A.eval())
+    distances_BA, ind_BA = nbrs_B.kneighbors(B.eval())
+
+    # get nearest neighbors A of B
+    nbrs_A = NearestNeighbors(n_neighbors=1, algorithm='ball_tree').fit(B.eval())
+    distances_AB, ind_AB = nbrs_A.kneighbors(A.eval())
+
+    # compute distances
+    dist_BA = tf.norm(tf.to_float(B) - tf.to_float(tf.gather(A, ind_BA[:, 0])), axis=1)
+    dist_AB = tf.norm(tf.to_float(A) - tf.to_float(tf.gather(B, ind_AB[:, 0])), axis=1)
+    summed_dist_BA = tf.reduce_sum(dist_BA)
+    summed_dist_AB = tf.reduce_sum(dist_AB)
+    # print(distances_BA.sum()+distances_AB.sum())
+    # print(tf.math.add(summed_dist_BA, summed_dist_AB).eval())
+
+    return tf.math.add(summed_dist_BA, summed_dist_AB)
+
+
+def mesh_reprojection_loss(silhouette_gt, silhouette_pred, name=None):
+    """
+    ADL4CV
+    Computes bidirectional distance between ground truth silhouette and predicted silhouette
+    Inputs:
+        silhouette_gt:      N x P (num pixels of silhoutte) x 2
+        silhouette_pred:    N x 6890 (num vertices) x 2
+    """
+    with tf.name_scope(name, "mesh_reprojection_loss", [silhouette_gt, silhouette_pred]):
+        N = silhouette_gt.shape[0]
+        #K = silhouette_gt.shape[1]
+      #  silhouette_gt = tf.reshape(silhouette_gt, (-1, 2))
+      #  silhouette_pred = tf.reshape(silhouette_pred, (-1, 2))
+      #  sil_gt_np = silhouette_gt.eval()
+      #  sil_pred_np = silhouette_pred.eval()
+        loss = tf.constant(0.)
+        for i in range(N):
+            loss = tf.math.add(loss, bidirectional_dist(silhouette_gt[i,:,:], silhouette_pred[i,:,:]))
+        return loss

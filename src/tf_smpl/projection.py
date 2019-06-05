@@ -31,11 +31,23 @@ def batch_orth_proj_idrot(X, camera, name=None):
         return tf.reshape(
             camera[:, :, 0] * tf.reshape(X_trans, [shape[0], -1]), shape)
 
+def reproject_vertices(verts, cam, im_size):
+    """
+    :argument:
+        verts:      N x 6890(num vertices) x 3
+        cam:        N x 3
+    :returns:
+        verts_im:   N x 6890 x 2
+    """
+    verts_reprojected = batch_orth_proj_idrot(tf.cast(verts, tf.float32), tf.cast(cam, tf.float32))
+    verts_im = tf.cast(((verts_reprojected + 1) * 0.5) * im_size, tf.int32)
+    return verts_im
 
+"""
 def reproject_vertices(proc_param, verts, cam, im_size):
-    """
+    
     TODO: adapt to multiple samples
-    """
+    
     # im_size = img.shape[:2]
     print("cam repro: ", cam)
     cam_ = tf.expand_dims(cam, 0)
@@ -49,3 +61,4 @@ def reproject_vertices(proc_param, verts, cam, im_size):
     verts_original = (verts_projected + proc_param['start_pt'] - margin) * undo_scale
     #verts_pixel = tf.cast(verts_original, tf.int32)
     return verts_original  # shape: num_verts x 2
+"""
