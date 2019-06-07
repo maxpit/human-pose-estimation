@@ -121,7 +121,6 @@ def _create_renderer(w=640,
                      k=None,
                      near=.5,
                      far=10.):
-
     f = np.array([w, w]) / 2. if f is None else f
     c = np.array([w, h]) / 2. if c is None else c
     k = np.zeros(5) if k is None else k
@@ -130,7 +129,7 @@ def _create_renderer(w=640,
 
     rn.camera = ProjectPoints(rt=rt, t=t, f=f, c=c, k=k)
     rn.frustum = {'near': near, 'far': far, 'height': h, 'width': w}
-    
+
     flipXRotation = np.array([[1.0, 0.0, 0.0, 0.0],
             [0.0, -1.0, 0., 0.0],
             [0.0, 0., -1.0, 0.0],
@@ -141,7 +140,7 @@ def _create_renderer(w=640,
     rn.overdraw = True
     rn.nsamples = 8
     rn.msaa = True  #Without anti-aliasing optimization often does not work.
-    
+
     return rn
 
 
@@ -157,6 +156,7 @@ def simple_renderer(rn,
                     faces,
                     yrot=np.radians(120),
                     color=colors['light_pink']):
+
     # Rendered model color
     rn.set(v=verts, f=faces, vc=color, bgcolor=np.ones(3))
     albedo = rn.vc
@@ -237,7 +237,6 @@ def render_model(verts,
         color = colors['light_blue']
     else:
         color_list = list(colors.values())
-        print(color_list)
         color = color_list[color_id % len(color_list)]
 
     imtmp = simple_renderer(rn, verts, faces, color=color)
@@ -248,6 +247,7 @@ def render_model(verts,
     elif img is not None and do_alpha:
         imtmp = append_alpha(imtmp)
 
+    rn.clear()
     return imtmp
 
 
@@ -404,8 +404,6 @@ def draw_skeleton(input_image, joints, draw_edges=True, vis=None, radius=None):
         print('Unknown skeleton!!')
         import ipdb
         ipdb.set_trace()
-    
-    print(colors['white'])
 
     for child in range(len(parents)):
         point = joints[:, child]
