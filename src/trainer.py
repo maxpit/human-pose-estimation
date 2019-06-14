@@ -29,7 +29,7 @@ import deepdish as dd
 
 # For drawing
 from .util import renderer as vis_util
-from .util.data_utils import get_silhouette_from_seg_im as get_sil
+#from .util.data_utils import get_silhouette_from_seg_im as get_sil
 
 MESH_REPROJECTION_LOSS=False
 
@@ -95,13 +95,13 @@ class HMRTrainer(object):
         # seg_gt: B x H x W x 1
         # kp_gt: B x 19 x 3
         self.image, self.seg_gt, self.kp_gt = iterator.get_next()
-
+        self.a = tf.reshape(self.kp_gt, (-1,3))
         # First make sure data_format is right
         if self.data_format == 'NCHW':
             # B x H x W x 3 --> B x 3 x H x W
             self.image = tf.transpose(self.image, [0, 3, 1, 2])
             self.seg_gt = tf.transpose(self.seg_gt, [0, 3, 1, 2])
-        
+
 #        if self.use_3d_label:
 #            self.poseshape_loader = data_loader['label3d']
 #            # image_loader[3] is N x 2, first column is 3D_joints gt existence,
@@ -172,15 +172,14 @@ class HMRTrainer(object):
 
             init_fn = load_pretrain
 
+        self.sess_config = tf.ConfigProto()
+        self.sess_config.gpu_options.per_process_gpu_memory_fraction = 0.88
+
         self.summary_writer = tf.summary.FileWriter(self.model_dir)
         self.sv = tf.train.MonitoredTrainingSession(
             summary_dir=self.model_dir,
+            config = self.sess_config
             )
-        gpu_options = tf.GPUOptions(allow_growth=True)
-        self.sess_config = tf.ConfigProto(
-            allow_soft_placement=False,
-            log_device_placement=False,
-            gpu_options=gpu_options)
 
     def use_pretrained(self):
         """
@@ -331,6 +330,7 @@ class HMRTrainer(object):
         self.all_pred_kps = tf.stack(self.all_pred_kps, axis=1)
         self.all_pred_cams = tf.stack(self.all_pred_cams, axis=1)
         self.show_imgs = tf.gather(self.image, self.show_these)
+        self.show_segs = tf.gather(self.seg_gt, self.show_these)
         self.show_kps = tf.gather(self.kp_gt, self.show_these)
 
         # Don't forget to update batchnorm's moving means.
@@ -482,16 +482,13 @@ class HMRTrainer(object):
 
         return loss_poseshape, loss_joints
 
-    def visualize_img(self, img, gt_kp, vert, pred_kp, cam, renderer):
+    def visualize_img(self, img, seg, gt_kp, vert, pred_kp, cam, renderer):
         """
         Overlays gt_kp and pred_kp on img.
         Draws vert with text.
         Renderer is an instance of SMPLRenderer.
         """
         gt_vis = gt_kp[:, 2].astype(bool)
-        print("gt_kp",gt_kp.shape)
-        print("pred_kp",pred_kp.shape)
-        print(gt_vis)
         loss = np.sum((gt_kp[gt_vis, :2] - pred_kp[gt_vis])**2)
         debug_text = {"sc": cam[0], "tx": cam[1], "ty": cam[2], "kpl": loss}
         # Fix a flength so i can render this with persp correct scale
@@ -511,20 +508,24 @@ class HMRTrainer(object):
             input_img, gt_joint, draw_edges=False, vis=gt_vis)
         skel_img = vis_util.draw_skeleton(img_with_gt, pred_joint)
 
-        combined = np.hstack([skel_img, rend_img / 255.])
 
-        # import matplotlib.pyplot as plt
-        # plt.ion()
-        # plt.imshow(skel_img)
-        # import ipdb; ipdb.set_trace()
+        # seg gt needs to be same dimension as color image.
+        seg = seg.squeeze()
+        seg2 = np.stack((seg,seg,seg), axis=2)
+        rend_seg = renderer(vert + cam_t, cam_for_render, img=seg2)
+
+        combined = np.hstack([skel_img, rend_img / 255., rend_seg / 255.])
         return combined
+
 
     def draw_results(self, result):
         import io
         import matplotlib.pyplot as plt
+        import cv2
 
         # This is B x H x W x 3
         imgs = result["input_img"]
+        segs = result["seg"]
         # B x 19 x 3
         gt_kps = result["gt_kp"]
         if self.data_format == 'NCHW':
@@ -538,18 +539,18 @@ class HMRTrainer(object):
 
         img_summaries = []
 
-        for img_id, (img, gt_kp, verts, joints, cams) in enumerate(
-                zip(imgs, gt_kps, est_verts, joints, cams)):
+        for img_id, (img, seg, gt_kp, verts, joints, cams) in enumerate(
+                zip(imgs, segs, gt_kps, est_verts, joints, cams)):
             # verts, joints, cams are a list of len T.
             all_rend_imgs = []
             for vert, joint, cam in zip(verts, joints, cams):
-                rend_img = self.visualize_img(img, gt_kp, vert, joint, cam,
+                rend_img = self.visualize_img(img, seg, gt_kp, vert, joint, cam,
                                               self.renderer)
                 all_rend_imgs.append(rend_img)
             combined = np.vstack(all_rend_imgs)
 
             sio = io.BytesIO()
-            
+
             plt.imsave(sio, combined, format='png')
             sio.seek(0)
 
@@ -557,6 +558,9 @@ class HMRTrainer(object):
                 encoded_image_string=sio.getvalue(),
                 height=combined.shape[0],
                 width=combined.shape[1])
+            sio.flush()
+            sio.close()
+            plt.close()
             img_summaries.append(
                 tf.Summary.Value(tag="vis_images/%d" % img_id, image=vis_sum))
 
@@ -572,7 +576,8 @@ class HMRTrainer(object):
             face_path=self.config.smpl_face_path)
 
         step = 0
-        
+
+
         print('...')
         with self.sv as sess:
             while not self.sv.should_stop():
@@ -589,6 +594,7 @@ class HMRTrainer(object):
                     fetch_dict.update({
                         "input_img": self.show_imgs,
                         "gt_kp": self.show_kps,
+                        "seg": self.show_segs,
                         "e_verts": self.all_verts,
                         "joints": self.all_pred_kps,
                         "cam": self.all_pred_cams,
