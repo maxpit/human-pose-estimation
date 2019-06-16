@@ -113,6 +113,72 @@ def get_encoder_fn_separate(model_type):
 
     return encoder_fn, threed_fn
 
+#def Critic_network(
+#        poses,
+#        shapes,
+#        weight_decay,
+#):
+#    """
+#    23 Discriminators on each joint + 1 for all joints + 1 for shape.
+#    To share the params on rotations, this treats the 23 rotation matrices
+#    as a "vertical image":
+#    Do 1x1 conv, then send off to 23 independent classifiers.
+#
+#    Input:
+#    - poses: N x 23 x 1 x 9, NHWC ALWAYS!!
+#    - shapes: N x 10
+#    - weight_decay: float
+#
+#    Outputs:
+#    - prediction: N x (1+23) or N x (1+23+1) if do_joint is on.
+#    - variables: tf variables
+#    """
+#    data_format = "NHWC"
+#    with tf.name_scope("Critic_network", [poses, shapes]):
+#        with tf.variable_scope("C") as scope:
+#            with slim.arg_scope(
+#                [slim.conv2d, slim.fully_connected],
+#                    weights_regularizer=slim.l2_regularizer(weight_decay)):
+#                with slim.arg_scope([slim.conv2d], data_format=data_format):
+#                    c = 
+##                    kcs_out = do_something_with_kcs_here!!
+#
+#                    kcs_fc_out = slim.fully_connected(kcs_out, 100,
+#                                                   activation_fn=nn.leaky_relu,
+#                                                   scope="kcs_fc")
+#
+#                    direct_out = slim.fully_connected(poses, 100,
+#                                                      activation_fn=nn.leaky_relu,
+#                                                      scope="direct_fc")
+#
+#                    merged_out = tf.concat([kcs_fc_out, direct_out], 1)
+#                    gan_out = slim.fully_connected(merged_out, 1,
+#                                                   activation_fn=None,
+#                                                   scope="wgan")
+#                    # Do shape on it's own:
+#                    shapes = slim.stack(
+#                        shapes,
+#                        slim.fully_connected, [10, 5],
+#                        scope="shape_fc1")
+#                    shape_out = slim.fully_connected(
+#                        shapes, 1, activation_fn=None, scope="shape_final")
+#                    """ Compute joint correlation prior!"""
+#                    nz_feat = 1024
+#                    poses_all = slim.flatten(poses, scope='vectorize')
+#                    poses_all = slim.fully_connected(
+#                        poses_all, nz_feat, scope="D_alljoints_fc1")
+#                    poses_all = slim.fully_connected(
+#                        poses_all, nz_feat, scope="D_alljoints_fc2")
+#                    poses_all_out = slim.fully_connected(
+#                        poses_all,
+#                        1,
+#                        activation_fn=None,
+#                        scope="D_alljoints_out")
+#                    out = tf.concat([theta_out_all,
+#                                     poses_all_out, shape_out], 1)
+#
+#            variables = tf.contrib.framework.get_variables(scope)
+#            return out, variables
 
 def Discriminator_separable_rotations(
         poses,

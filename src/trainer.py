@@ -31,7 +31,7 @@ import deepdish as dd
 from .util import renderer as vis_util
 #from .util.data_utils import get_silhouette_from_seg_im as get_sil
 
-MESH_REPROJECTION_LOSS=False
+MESH_REPROJECTION_LOSS=True
 
 class HMRTrainer(object):
     def __init__(self, config, dataset, mocap_loader = None):
@@ -276,12 +276,13 @@ class HMRTrainer(object):
                 loss_kps.append(self.e_loss_weight * self.keypoint_loss(
                         self.kp_gt, pred_kp))
             else:
-                silhouette_gt = tf.where(tf.equal(self.seg_gt, 1.))[:, :3]  # check weather it's 1 or > 0.5 or else
+                silhouette_gt = tf.where(tf.greater(self.seg_gt, .5))[:, :3]  # check weather it's 1 or > 0.5 or else
                 #silhouette_gt = get_sil(self.seg_gt)
-                silhouette_pred = reproject_vertices(verts, cams, self.image.shape[1:3])
+                silhouette_pred = reproject_vertices(verts, cams,
+                                                     self.image.shape.as_list()[1:3])
 
                 loss_kps.append(self.e_loss_weight * self.mesh_repro_loss(
-                    silhouette_gt, silhouette_pred))
+                    silhouette_gt, silhouette_pred, self.batch_size))
 
             pred_Rs = tf.reshape(pred_Rs, [-1, 24, 9])
             if self.use_3d_label:

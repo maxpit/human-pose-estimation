@@ -39,8 +39,19 @@ def reproject_vertices(verts, cam, im_size):
     :returns:
         verts_im:   N x 6890 x 2
     """
-    verts_reprojected = batch_orth_proj_idrot(tf.cast(verts, tf.float32), tf.cast(cam, tf.float32))
-    verts_im = tf.cast(((verts_reprojected + 1) * 0.5) * im_size, tf.int32)
+    print("VERTS!!!!!!:",verts)
+    print("CAM!!!!!!!!:",cam)
+    verts_reprojected = batch_orth_proj_idrot(verts, cam)
+    print("VERTS again", verts_reprojected)
+    verts_calc = tf.multiply(tf.add(verts_reprojected,
+                                      tf.ones_like(verts_reprojected)), 0.5)
+    print("Verts calc", verts_calc)
+    print("image size", im_size)
+    print("constant im size", tf.constant([im_size[0], im_size[1]]))
+    verts_calc = tf.multiply(verts_calc, im_size)
+    verts_im = tf.cast(verts_calc, tf.int32)
+    print("verts_im", verts_im)
+    #TODO check whether multiplication is right
     return verts_im
 
 """
