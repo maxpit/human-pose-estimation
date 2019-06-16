@@ -8,6 +8,7 @@ from __future__ import print_function
 
 import tensorflow as tf
 from sklearn.neighbors import NearestNeighbors
+import numpy as np
 
 
 def keypoint_l1_loss(kp_gt, kp_pred, scale=1., name=None):
@@ -86,8 +87,10 @@ def mesh_reprojection_loss(silhouette_gt, silhouette_pred, name=None):
     ADL4CV
     Computes bidirectional distance between ground truth silhouette and predicted silhouette
     Inputs:
-        silhouette_gt:      N x P (num pixels of silhoutte) x 2
+        silhouette_gt:      ### N x P (num pixels of silhouette) x 2 -->   try with N*P x 3
         silhouette_pred:    N x 6890 (num vertices) x 2
+
+
     """
     with tf.name_scope(name, "mesh_reprojection_loss", [silhouette_gt, silhouette_pred]):
         N = silhouette_gt.shape[0]
@@ -98,5 +101,5 @@ def mesh_reprojection_loss(silhouette_gt, silhouette_pred, name=None):
       #  sil_pred_np = silhouette_pred.eval()
         loss = tf.constant(0.)
         for i in range(N):
-            loss = tf.math.add(loss, bidirectional_dist(silhouette_gt[i,:,:], silhouette_pred[i,:,:]))
+            loss = tf.math.add(loss, bidirectional_dist(tf.gather_nd(silhouette_gt, tf.where(tf.equal(silhouette_gt[:, 0], 1)))[i, 1:], silhouette_pred[i,:,:]))
         return loss

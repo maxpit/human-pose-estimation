@@ -276,8 +276,10 @@ class HMRTrainer(object):
                 loss_kps.append(self.e_loss_weight * self.keypoint_loss(
                         self.kp_gt, pred_kp))
             else:
-                silhouette_gt = get_sil(self.seg_gt)
+                silhouette_gt = tf.where(tf.equal(self.seg_gt, 1.))[:, :3]  # check weather it's 1 or > 0.5 or else
+                #silhouette_gt = get_sil(self.seg_gt)
                 silhouette_pred = reproject_vertices(verts, cams, self.image.shape[2:])
+
                 loss_kps.append(self.e_loss_weight * self.mesh_repro_loss(
                     silhouette_gt, silhouette_pred))
 
