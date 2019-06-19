@@ -64,22 +64,37 @@ def align_by_pelvis(joints):
 def bidirectional_dist(A, B):
     # get nearest neighbors B of A
     #if (A = tenso)
-    nbrs_B = NearestNeighbors(n_neighbors=1,
-                              algorithm='ball_tree').fit(A)
-    distances_BA, ind_BA = nbrs_B.kneighbors(B)
 
-    # get nearest neighbors A of B
-    nbrs_A = NearestNeighbors(n_neighbors=1,
-                              algorithm='ball_tree').fit(B)
-    distances_AB, ind_AB = nbrs_A.kneighbors(A)
+    #A_np = np.copy(A)
+    #B_np = np.copy(B)
+    #print(A_np)
+    #print(B_np)
+    #B_const = tf.constant(B)
+    print("A: ", A)
+    print("B: ", B)
 
-    # compute distances
-    dist_BA = tf.norm(tf.to_float(B) - tf.to_float(tf.gather(A, ind_BA[:, 0])), axis=1)
-    dist_AB = tf.norm(tf.to_float(A) - tf.to_float(tf.gather(B, ind_AB[:, 0])), axis=1)
-    summed_dist_BA = tf.reduce_sum(dist_BA)
-    summed_dist_AB = tf.reduce_sum(dist_AB)
-    # print(distances_BA.sum()+distances_AB.sum())
-    # print(tf.math.add(summed_dist_BA, summed_dist_AB).eval())
+    with tf.Session() as sess:
+        tf.initialize_all_variables().run()
+        print("A.shape: ", A.eval(session=sess).shape)
+        print("B.shape: ", B.eval(session=sess).shape)
+        #print("eval A: ", A.eval(session=sess))
+        #print("eval B: ", B.eval(session=sess))
+        nbrs_B = NearestNeighbors(n_neighbors=1,
+                                  algorithm='ball_tree').fit(sess.run(A))
+        distances_BA, ind_BA = nbrs_B.kneighbors(sess.run(B))
+
+        # get nearest neighbors A of B
+        nbrs_A = NearestNeighbors(n_neighbors=1,
+                                  algorithm='ball_tree').fit(sess.run(B))
+        distances_AB, ind_AB = nbrs_A.kneighbors(sess.run(A))
+
+        # compute distances
+        dist_BA = tf.norm(tf.to_float(B) - tf.to_float(tf.gather(A, ind_BA[:, 0])), axis=1)
+        dist_AB = tf.norm(tf.to_float(A) - tf.to_float(tf.gather(B, ind_AB[:, 0])), axis=1)
+        summed_dist_BA = tf.reduce_sum(dist_BA)
+        summed_dist_AB = tf.reduce_sum(dist_AB)
+        # print(distances_BA.sum()+distances_AB.sum())
+        # print(tf.math.add(summed_dist_BA, summed_dist_AB).eval())
 
     return tf.math.add(summed_dist_BA, summed_dist_AB)
 

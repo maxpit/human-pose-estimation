@@ -272,14 +272,26 @@ class HMRTrainer(object):
                     Js, cams, name='proj2d_stage%d' % i)
                 # --- Compute losses:
 
+            '''
+            with tf.Session() as sess:
+                tf.initialize_all_variables().run()
+                print("kp_gt: ", self.kp_gt)
+                print(sess.run(self.kp_gt))
+                print("pred_kp: ", pred_kp)
+                print(sess.run(pred_kp))
+            '''
+
             if(not MESH_REPROJECTION_LOSS):
                 loss_kps.append(self.e_loss_weight * self.keypoint_loss(
                         self.kp_gt, pred_kp))
             else:
+                print("seg_gt: ", self.seg_gt)
                 silhouette_gt = tf.where(tf.greater(self.seg_gt, .5))[:, :3]  # check weather it's 1 or > 0.5 or else
                 #silhouette_gt = get_sil(self.seg_gt)
                 silhouette_pred = reproject_vertices(verts, cams,
                                                      self.image.shape.as_list()[1:3])
+                print("silhouette_gt: ", silhouette_gt)
+                print("silhouette_pred: ", silhouette_pred)
 
                 loss_kps.append(self.e_loss_weight * self.mesh_repro_loss(
                     silhouette_gt, silhouette_pred, self.batch_size))
