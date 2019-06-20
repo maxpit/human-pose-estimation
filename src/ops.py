@@ -61,6 +61,40 @@ def align_by_pelvis(joints):
         pelvis = (joints[:, left_id, :] + joints[:, right_id, :]) / 2.
         return joints - tf.expand_dims(pelvis, axis=1)
 
+def find_neighbors_naive(A, B):
+    B = tf.cast(B, dtype=tf.int64)
+    ind_BA = []
+    for i in range(B.shape[0]):
+        # print(i)
+        distance = tf.reduce_sum(tf.abs(tf.add(A, tf.negative(B[i, :]))), reduction_indices=1)
+        # print(distance)
+        # Prediction: Get min distance index (Nearest neighbor)
+        ind = tf.argmin(distance, 0)
+        # with tf.Session() as sess:
+        #    print("dist: ", distance.eval())
+        #    print("pred: ", ind.eval())
+        # print(ind)
+        ind_BA.append(ind)
+    ind_BA = tf.stack(ind_BA)
+
+    ind_AB = []
+    #for i in range(A.shape[0]):
+    for i in range(100):
+        # print(i)
+        distance = tf.reduce_sum(tf.abs(tf.add(B, tf.negative(A[i, :]))), reduction_indices=1)
+        # print(distance)
+        # Prediction: Get min distance index (Nearest neighbor)
+        ind = tf.argmin(distance, 0)
+        # with tf.Session() as sess:
+        #    print("dist: ", distance.eval())
+        #    print("pred: ", ind.eval())
+        # print(ind)
+        ind_AB.append(ind)
+    ind_AB = tf.stack(ind_AB)
+
+    return ind_AB, ind_BA
+
+
 def bidirectional_dist(A, B):
     # get nearest neighbors B of A
     #if (A = tenso)
@@ -73,28 +107,29 @@ def bidirectional_dist(A, B):
     print("A: ", A)
     print("B: ", B)
 
-    with tf.Session() as sess:
-        tf.initialize_all_variables().run()
-        print("A.shape: ", A.eval(session=sess).shape)
-        print("B.shape: ", B.eval(session=sess).shape)
-        #print("eval A: ", A.eval(session=sess))
-        #print("eval B: ", B.eval(session=sess))
-        nbrs_B = NearestNeighbors(n_neighbors=1,
-                                  algorithm='ball_tree').fit(sess.run(A))
-        distances_BA, ind_BA = nbrs_B.kneighbors(sess.run(B))
+    #with tf.Session() as sess:
+    #tf.initialize_all_variables().run()
+    #print("A.shape: ", A.eval(session=sess).shape)
+    #print("B.shape: ", B.eval(session=sess).shape)
+    #print("eval A: ", A.eval(session=sess))
+    #print("eval B: ", B.eval(session=sess))
+    #nbrs_B = NearestNeighbors(n_neighbors=1,
+    #                          algorithm='ball_tree').fit(sess.run(A))
+    #distances_BA, ind_BA = nbrs_B.kneighbors(sess.run(B))
 
-        # get nearest neighbors A of B
-        nbrs_A = NearestNeighbors(n_neighbors=1,
-                                  algorithm='ball_tree').fit(sess.run(B))
-        distances_AB, ind_AB = nbrs_A.kneighbors(sess.run(A))
+    # get nearest neighbors A of B
+    #nbrs_A = NearestNeighbors(n_neighbors=1,
+    #                          algorithm='ball_tree').fit(sess.run(B))
+    #distances_AB, ind_AB = nbrs_A.kneighbors(sess.run(A))
+    ind_AB, ind_BA = find_neighbors_naive(A, B)
 
-        # compute distances
-        dist_BA = tf.norm(tf.to_float(B) - tf.to_float(tf.gather(A, ind_BA[:, 0])), axis=1)
-        dist_AB = tf.norm(tf.to_float(A) - tf.to_float(tf.gather(B, ind_AB[:, 0])), axis=1)
-        summed_dist_BA = tf.reduce_sum(dist_BA)
-        summed_dist_AB = tf.reduce_sum(dist_AB)
-        # print(distances_BA.sum()+distances_AB.sum())
-        # print(tf.math.add(summed_dist_BA, summed_dist_AB).eval())
+    # compute distances
+    dist_BA = tf.norm(tf.to_float(B) - tf.to_float(tf.gather(A, ind_BA)), axis=1)
+    dist_AB = tf.norm(tf.to_float(A) - tf.to_float(tf.gather(B, ind_AB)), axis=1)
+    summed_dist_BA = tf.reduce_sum(dist_BA)
+    summed_dist_AB = tf.reduce_sum(dist_AB)
+    # print(distances_BA.sum()+distances_AB.sum())
+    # print(tf.math.add(summed_dist_BA, summed_dist_AB).eval())
 
     return tf.math.add(summed_dist_BA, summed_dist_AB)
 
@@ -116,7 +151,7 @@ def mesh_reprojection_loss(silhouette_gt, silhouette_pred, batch_size, name=None
       #  sil_gt_np = silhouette_gt.eval()
       #  sil_pred_np = silhouette_pred.eval()
         print("silhouette_gt!!!!!!!!!!!!!!!", silhouette_gt)
-        loss = tf.constant(0.)
+        loss = tf.constant(0.) #variable?
         for i in range(batch_size):
             loss = tf.math.add(loss,
                     bidirectional_dist(tf.gather_nd(silhouette_gt,
