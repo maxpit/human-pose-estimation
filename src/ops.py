@@ -151,7 +151,7 @@ def mesh_reprojection_loss(silhouette_gt, silhouette_pred, batch_size, name=None
       #  sil_gt_np = silhouette_gt.eval()
       #  sil_pred_np = silhouette_pred.eval()
         print("silhouette_gt!!!!!!!!!!!!!!!", silhouette_gt)
-        loss = tf.constant(0.) #variable?
+        loss = tf.Variable(0.) # variable?
         for i in range(batch_size):
             loss = tf.math.add(loss,
                     bidirectional_dist(tf.gather_nd(silhouette_gt,

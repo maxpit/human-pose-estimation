@@ -268,25 +268,46 @@ class HMRTrainer(object):
             shapes = theta_here[:, (self.num_cam + self.num_theta):]
             # Rs_wglobal is Nx24x3x3 rotation matrices of poses
             verts, Js, pred_Rs = self.smpl(shapes, poses, get_skin=True)
-            pred_kp = batch_orth_proj_idrot(
-                    Js, cams, name='proj2d_stage%d' % i)
+
                 # --- Compute losses:
 
             '''
             with tf.Session() as sess:
-                tf.initialize_all_variables().run()
-                print("kp_gt: ", self.kp_gt)
-                print(sess.run(self.kp_gt))
-                print("pred_kp: ", pred_kp)
-                print(sess.run(pred_kp))
+                #tf.initialize_all_variables().run()
+                #print("kp_gt: ", self.kp_gt)
+                #print(sess.run(self.kp_gt))
+                seg_np1 = np.squeeze(sess.run(self.seg_gt)[0,:,:,:], axis=2)
+                img_np1 = sess.run(self.image)[0,:,:,:]
+                indices_2 = np.argwhere(seg_np1 == 1.)
+                seg_np1_2 = np.copy(seg_np1)
+                seg_np1_2[indices_2[:,0], indices_2[:,1]] = 0.
+                indices = np.argwhere(seg_np1_2 > 0.)
+                seg_np1_2[indices[:,0], indices[:,1]] = .5
+
+
+                #print("seg_gt: ", self.seg_gt.eval(session=sess)[0,50:80,50:80,0])
+                #print("seg_gt: ", self.seg_gt.eval(session=sess)[0,50:80,50:80,0])
+                #print("seg_gt.shape: ", self.seg_gt.eval(session=sess).shape)
+                #img = self.seg_gt.eval(session=sess)[0,:,:,:]
+                #print(img[50:80,50:80,0])
+                #img = np.squeeze(img, axis=2)
+                import matplotlib.pyplot as plt
+                fig, axs = plt.subplots(2)
+                axs[0].imshow(seg_np1)
+                axs[1].imshow(seg_np1_2)
+
+                plt.show()
             '''
 
+
             if(not MESH_REPROJECTION_LOSS):
+                pred_kp = batch_orth_proj_idrot(
+                    Js, cams, name='proj2d_stage%d' % i)
                 loss_kps.append(self.e_loss_weight * self.keypoint_loss(
                         self.kp_gt, pred_kp))
             else:
                 print("seg_gt: ", self.seg_gt)
-                silhouette_gt = tf.where(tf.greater(self.seg_gt, .5))[:, :3]  # check weather it's 1 or > 0.5 or else
+                silhouette_gt = tf.where(tf.greater(self.seg_gt, 0.))[:, :3]
                 #silhouette_gt = get_sil(self.seg_gt)
                 silhouette_pred = reproject_vertices(verts, cams,
                                                      self.image.shape.as_list()[1:3])
@@ -309,7 +330,8 @@ class HMRTrainer(object):
 
             # Save things for visualiations:
             self.all_verts.append(tf.gather(verts, self.show_these))
-            self.all_pred_kps.append(tf.gather(pred_kp, self.show_these))
+            if(not MESH_REPROJECTION_LOSS):
+                self.all_pred_kps.append(tf.gather(pred_kp, self.show_these))
             self.all_pred_cams.append(tf.gather(cams, self.show_these))
 
             # Finally update to end iteration.
@@ -342,7 +364,8 @@ class HMRTrainer(object):
         # For visualizations, only save selected few into:
         # B x T x ...
         self.all_verts = tf.stack(self.all_verts, axis=1)
-        self.all_pred_kps = tf.stack(self.all_pred_kps, axis=1)
+        if(not MESH_REPROJECTION_LOSS):
+            self.all_pred_kps = tf.stack(self.all_pred_kps, axis=1)
         self.all_pred_cams = tf.stack(self.all_pred_cams, axis=1)
         self.show_imgs = tf.gather(self.image, self.show_these)
         self.show_segs = tf.gather(self.seg_gt, self.show_these)
@@ -360,6 +383,9 @@ class HMRTrainer(object):
         d_optimizer = self.optimizer(self.d_lr)
         e_optimizer = self.optimizer(self.e_lr)
 
+        #with tf.Session() as sess:
+        #    writer = tf.summary.FileWriter("./logs", sess.graph)
+        self.setup_summaries(loss_kps) # remove later
         self.e_opt = e_optimizer.minimize(
             self.e_loss, global_step=self.global_step, var_list=self.E_var)
         if not self.encoder_only:
@@ -582,6 +608,10 @@ class HMRTrainer(object):
         img_summary = tf.Summary(value=img_summaries)
         self.summary_writer.add_summary(
             img_summary, global_step=result['step'])
+
+        ###
+        self.summary_writer.close()
+        ###
 
     def train(self):
         print('started training')

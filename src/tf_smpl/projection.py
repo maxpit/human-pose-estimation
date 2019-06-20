@@ -49,10 +49,10 @@ def reproject_vertices(verts, cam, im_size):
     print("image size", im_size)
     print("constant im size", tf.constant([im_size[0], im_size[1]]))
     verts_calc = tf.multiply(verts_calc, im_size)
-    verts_im = tf.cast(verts_calc, tf.int32)
-    print("verts_im", verts_im)
+    #verts_im = tf.cast(verts_calc, tf.int32)
+    #print("verts_im", verts_im)
     #TODO check whether multiplication is right
-    return verts_im
+    return verts_calc
 
 """
 def reproject_vertices(proc_param, verts, cam, im_size):
