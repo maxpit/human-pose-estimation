@@ -122,10 +122,10 @@ class HMRTrainer(object):
         print("array: ", np.arange(num2show / 2), "...", self.batch_size - np.arange(3) - 1)
         print("np_stack: ", np.hstack(
             [np.arange(num2show / 2), self.batch_size - np.arange(3) - 1]))
-        self.show_these = tf.constant(
-            np.hstack(
-                [np.arange(num2show / 2), self.batch_size - np.arange(3) - 1]),
-            tf.int32)
+        show_these_np = np.hstack(
+            [np.arange(num2show / 2), self.batch_size - np.arange(3) - 1])
+        print("SHOW THESE NP: ", show_these_np)
+        self.show_these = tf.constant(show_these_np, tf.int32)
 
         # Model spec
         self.model_type = config.model_type
@@ -369,7 +369,11 @@ class HMRTrainer(object):
         self.all_pred_cams = tf.stack(self.all_pred_cams, axis=1)
         self.show_imgs = tf.gather(self.image, self.show_these)
         self.show_segs = tf.gather(self.seg_gt, self.show_these)
-        self.show_kps = tf.gather(self.kp_gt, self.show_these)
+        if(not MESH_REPROJECTION_LOSS):
+            with tf.Session() as sess:
+                print("kp_gt: ", self.kp_gt.eval(session=sess))
+                print("show_these: ", self.show_these.eval(session=sess))
+                self.show_kps = tf.gather(self.kp_gt, self.show_these)
 
         # Don't forget to update batchnorm's moving means.
         print('collecting batch norm moving means!!')
@@ -385,7 +389,7 @@ class HMRTrainer(object):
 
         #with tf.Session() as sess:
         #    writer = tf.summary.FileWriter("./logs", sess.graph)
-        self.setup_summaries(loss_kps) # remove later
+        #self.setup_summaries(loss_kps) # remove later
         self.e_opt = e_optimizer.minimize(
             self.e_loss, global_step=self.global_step, var_list=self.E_var)
         if not self.encoder_only:
@@ -638,12 +642,13 @@ class HMRTrainer(object):
                 if step % self.log_img_step == 0:
                     fetch_dict.update({
                         "input_img": self.show_imgs,
-                        "gt_kp": self.show_kps,
+                        #"gt_kp": self.show_kps,
                         "seg": self.show_segs,
                         "e_verts": self.all_verts,
                         "joints": self.all_pred_kps,
                         "cam": self.all_pred_cams,
                     })
+
 
                 t0 = time()
                 result = sess.run(fetch_dict)
