@@ -61,7 +61,7 @@ def align_by_pelvis(joints):
         pelvis = (joints[:, left_id, :] + joints[:, right_id, :]) / 2.
         return joints - tf.expand_dims(pelvis, axis=1)
 
-def find_neighbors_naive(A, B):
+def find_nearest_neighbors_naive(A, B):
     B = tf.cast(B, dtype=tf.int64)
     ind_BA = []
     for i in range(B.shape[0]):
@@ -95,6 +95,15 @@ def find_neighbors_naive(A, B):
     return ind_AB, ind_BA
 
 
+def find_nearest_neighbors_advanced(A, B):
+    dists = tf.scalar_mul(-2., tf.matmul(A, B, transpose_b=True)) + \
+            tf.expand_dims(tf.reduce_sum(tf.square(A), 1), 1) + \
+            tf.expand_dims(tf.reduce_sum(tf.square(B), axis=1), 0)
+    ind_AB = tf.argmin(dists, 1)
+    ind_BA = tf.argmin(dists, 0)
+    return ind_AB, ind_BA
+
+
 def bidirectional_dist(A, B):
     # get nearest neighbors B of A
     #if (A = tenso)
@@ -121,7 +130,8 @@ def bidirectional_dist(A, B):
     #nbrs_A = NearestNeighbors(n_neighbors=1,
     #                          algorithm='ball_tree').fit(sess.run(B))
     #distances_AB, ind_AB = nbrs_A.kneighbors(sess.run(A))
-    ind_AB, ind_BA = find_neighbors_naive(A, B)
+    #ind_AB, ind_BA = find_nearest_neighbors_naive(A, B)
+    ind_AB, ind_BA = find_nearest_neighbors_advanced(tf.cast(A, dtype=tf.float32), B)
 
     # compute distances
     dist_BA = tf.norm(tf.to_float(B) - tf.to_float(tf.gather(A, ind_BA)), axis=1)
@@ -151,9 +161,14 @@ def mesh_reprojection_loss(silhouette_gt, silhouette_pred, batch_size, name=None
       #  sil_gt_np = silhouette_gt.eval()
       #  sil_pred_np = silhouette_pred.eval()
         print("silhouette_gt!!!!!!!!!!!!!!!", silhouette_gt)
-        loss = tf.Variable(0.) # variable?
-        for i in range(batch_size):
-            loss = tf.math.add(loss,
-                    bidirectional_dist(tf.gather_nd(silhouette_gt,
-                                                    tf.where(tf.equal(silhouette_gt[:,0], i)))[:, 1:], silhouette_pred[i,:,:]))
+        if(batch_size==1):
+            loss = bidirectional_dist(tf.gather_nd(silhouette_gt,
+                                                    tf.where(tf.equal(silhouette_gt[:,0], 0)))[:, 1:], silhouette_pred[0,:,:])
+        else:
+            loss = tf.Variable(0.) # variable?
+            for i in range(batch_size):
+
+                loss = tf.math.add(loss,
+                        bidirectional_dist(tf.gather_nd(silhouette_gt,
+                                                        tf.where(tf.equal(silhouette_gt[:,0], i)))[:, 1:], silhouette_pred[i,:,:]))
         return loss
