@@ -25,6 +25,7 @@ def num_examples(datasets):
         'lsp_ext': 10000,
         'lsp_single': 1,
         'lsp_single_new': 1,
+        'single_new_try': 1,
         'mpii': 20000,
         'h36m': 312188,
         'coco': 79344,

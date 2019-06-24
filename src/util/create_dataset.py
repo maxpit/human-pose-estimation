@@ -1,14 +1,18 @@
 import numpy as np
 import skimage.io as io
 import tensorflow as tf
+import scipy.io as sio
+
 from glob import glob
 from os.path import basename
+from .common import ImageCoder
 
 file_dir = '/home/valentin/Code/ADL/human-pose-estimation/data/'
 
 lsp_dir = file_dir + 'lsp_dataset/'
 lsp_im = lsp_dir + 'images/'
 lsp_seg = file_dir + 'upi-s1h/data/lsp/'
+mpi_dir = file_dir + 'mpi_3dhp'
 
 def load_mat(fname):
     import scipy.io as sio
@@ -34,7 +38,7 @@ def _float_feature(value):
 
 
 
-def _add_to_tfrecord(img_path, gt_path, label, writer, is_lsp_ext=False):
+def _add_to_tfrecord(img_path, gt_path, label, coder, writer, is_lsp_ext=False):
 
     if is_lsp_ext:
         visible = label[2, :].astype(bool)
@@ -45,13 +49,20 @@ def _add_to_tfrecord(img_path, gt_path, label, writer, is_lsp_ext=False):
     min_pt = np.min(label[:2, visible], axis=1)
     max_pt = np.max(label[:2, visible], axis=1)
     center = (min_pt + max_pt) / 2.
-    
-    img = np.array(io.imread(img_path))
-    gt = np.array(io.imread(gt_path))
 
-    
-    img_raw = img.tostring()
-    gt_raw = gt.tostring()
+    with tf.gfile.FastGFile(img_path, 'rb') as f:
+        image_data = f.read()
+
+    with tf.gfile.FastGFile(gt_path, 'rb') as f:
+        seg_data = f.read()
+
+    img = coder.decode_jpeg(image_data)
+    #img = np.array(io.imread(img_path))
+    #+gt = np.array(io.imread(gt_path))
+    #gt = coder.decode_jpeg(seg_data)
+
+    #img_raw = img.tostring()
+    #gt_raw = gt.tostring()
 
     add_face = False
     if label.shape[1] == 19:
@@ -68,8 +79,8 @@ def _add_to_tfrecord(img_path, gt_path, label, writer, is_lsp_ext=False):
         'image/y': _float_feature(label[1, :].astype(np.float)),
         'image/visibility': _int64_feature(label[2, :].astype(np.int)),
         'image/filename': _bytes_feature(tf.compat.as_bytes(basename(img_path))),
-        'image/encoded': _bytes_feature(img_raw),
-        'image/seg_gt': _bytes_feature(gt_raw) 
+        'image/encoded': _bytes_feature(tf.compat.as_bytes(image_data)),
+        'image/seg_gt': _bytes_feature(tf.compat.as_bytes(seg_data)) 
     }
     if add_face:
         # 3 x 5
@@ -86,6 +97,7 @@ def _add_to_tfrecord(img_path, gt_path, label, writer, is_lsp_ext=False):
 def create (tfrecords_filename, filename_pairs):
     writer = tf.python_io.TFRecordWriter(tfrecords_filename)
 
+    coder = ImageCoder()
     # Load labels 3 x 14 x N
     labels = load_mat((lsp_dir+'joints.mat'))
     if labels.shape[0] != 3:
@@ -96,16 +108,19 @@ def create (tfrecords_filename, filename_pairs):
                 filename_pairs[i][0],
                 filename_pairs[i][1],
                 labels[:, :, i],
+                coder,
                 writer)
-        
+ 
     writer.close()
 
+def get_available_mpi_data():
+    all_dirs
 
 def get_filename_pairs_single():
     im1 = lsp_im + 'im0001.jpg'
     seg1 = lsp_seg + 'im0001_segmentation.png'
 
-    filename_pairs = [(im1, seg1)]
+    filename_pair = [(im1, seg1)]
 
     return filename_pair
 
