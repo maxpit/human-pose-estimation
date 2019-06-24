@@ -166,14 +166,23 @@ def mesh_reprojection_loss(silhouette_gt, silhouette_pred, batch_size, name=None
             #loss = bidirectional_dist(tf.gather_nd(silhouette_gt,
              #                                       tf.where(tf.equal(silhouette_gt[:,0], 0)))[:, 1:], silhouette_pred[0,:,:])
         #else:
-        loss = tf.Variable(0.) # variable?
-        ab_all = tf.Variable(0.) # variable?
-        ba_all = tf.Variable(0.) # variable?
+        loss = tf.Variable(0., name="mesh_reprojection_loss", trainable=False) # variable?
+        ab_all = tf.Variable(0., trainable=False) # variable?
+        ba_all = tf.Variable(0., trainable=False) # variable?
         for i in range(batch_size):
-            bi_loss, ba, ab = bidirectional_dist(tf.gather_nd(silhouette_gt,
-                                            tf.where(tf.equal(silhouette_gt[:, 0], i)))[:, 1:],
+            silhouette_points_gt = tf.stack([tf.gather_nd(silhouette_gt,
+                                            tf.where(tf.equal(silhouette_gt[:, 0], i)))[:, 2],
+                                             tf.gather_nd(silhouette_gt,
+                                                          tf.where(tf.equal(silhouette_gt[:, 0], i)))[:, 1]
+                                             ], axis=1)
+
+            bi_loss, ba, ab = bidirectional_dist(silhouette_points_gt,
                                silhouette_pred[i, :, :])
             loss = tf.math.add(loss, bi_loss)
             ab_all = tf.math.add(ab_all, ab)
             ba_all = tf.math.add(ba_all, ba)
-        return loss, ab_all, ba_all
+        return loss, ab_all, ba_all, tf.stack([tf.gather_nd(silhouette_gt,
+                                            tf.where(tf.equal(silhouette_gt[:, 0], 0)))[:, 2],
+                                             tf.gather_nd(silhouette_gt,
+                                                          tf.where(tf.equal(silhouette_gt[:, 0], 0)))[:, 1]
+                                             ], axis=1), silhouette_pred[0, :, :]

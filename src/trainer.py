@@ -283,35 +283,27 @@ class HMRTrainer(object):
             verts, Js, pred_Rs = self.smpl(shapes, poses, get_skin=True)
 
                 # --- Compute losses:
-
             '''
+            dict_test = {
+                "img": self.image,
+                "seg_gt": self.seg_gt,
+                "image_feat": self.img_feat
+            }
+
             with tf.Session() as sess:
-                #tf.initialize_all_variables().run()
-                #print("kp_gt: ", self.kp_gt)
-                #print(sess.run(self.kp_gt))
-                seg_np1 = np.squeeze(sess.run(self.seg_gt)[0,:,:,:], axis=2)
-                img_np1 = sess.run(self.image)[0,:,:,:]
-                indices_2 = np.argwhere(seg_np1 == 1.)
-                seg_np1_2 = np.copy(seg_np1)
-                seg_np1_2[indices_2[:,0], indices_2[:,1]] = 0.
-                indices = np.argwhere(seg_np1_2 > 0.)
-                seg_np1_2[indices[:,0], indices[:,1]] = .5
+                res = sess.run(dict_test)
+                print("img.shape", res["img"].shape)
+                print("seg_gt.shape", res["seg_gt"].shape)
+                #print("verts.shape", res["verts"].shape)
+                print("image_feat.shape", res["image_feat"].shape)
 
-
-                #print("seg_gt: ", self.seg_gt.eval(session=sess)[0,50:80,50:80,0])
-                #print("seg_gt: ", self.seg_gt.eval(session=sess)[0,50:80,50:80,0])
-                #print("seg_gt.shape: ", self.seg_gt.eval(session=sess).shape)
-                #img = self.seg_gt.eval(session=sess)[0,:,:,:]
-                #print(img[50:80,50:80,0])
-                #img = np.squeeze(img, axis=2)
                 import matplotlib.pyplot as plt
                 fig, axs = plt.subplots(2)
-                axs[0].imshow(seg_np1)
-                axs[1].imshow(seg_np1_2)
-
+                axs[0].imshow(res["img"][0])
+                seg_np = np.squeeze(res["seg_gt"][0], axis=2)
+                axs[1].imshow(seg_np)
                 plt.show()
             '''
-
 
             pred_kp = batch_orth_proj_idrot(
                 Js, cams, name='proj2d_stage%d' % i)
@@ -324,9 +316,11 @@ class HMRTrainer(object):
                 #silhouette_gt = get_sil(self.seg_gt)
                 silhouette_pred = reproject_vertices(verts, cams,
                                                      self.image.shape.as_list()[1:3], name='mesh_reproject_stage%d' % i)
+                self.silhouette_pred = silhouette_pred
+                self.silhouette_gt = silhouette_gt
                 print("silhouette_gt: ", silhouette_gt)
                 print("silhouette_pred: ", silhouette_pred)
-                repro_loss, ba_dist, ab_dist = self.mesh_repro_loss(
+                repro_loss, ba_dist, ab_dist, self.sil_pts_gt, self.sil_pts_pred = self.mesh_repro_loss(
                     silhouette_gt, silhouette_pred, self.batch_size, name='mesh_repro_loss' % i)
                 loss_kps.append(self.e_loss_weight * repro_loss)
                 ba_dists.append(ba_dist)
@@ -674,7 +668,18 @@ class HMRTrainer(object):
                     # The meat
                     "e_opt": self.e_opt,
                     "loss_kp": self.e_loss_kp
+
+                    #####
+                    #"img": self.image,
+                    #"seg_gt": self.seg_gt,
+                    #"image_feat": self.img_feat,
+                    #"sil_pred": self.silhouette_pred,
+                    #"sil_gt": self.silhouette_gt,
+                    #"sil_pts_gt": self.sil_pts_gt,
+                    #"sil_pts_pred": self.sil_pts_pred
+                    #####
                 }
+
 
                 if(not self.use_mesh_repro_loss):
                     if step % self.log_img_step == 0:
@@ -702,6 +707,32 @@ class HMRTrainer(object):
                 t0 = time()
                 result = sess.run(fetch_dict)
                 t1 = time()
+
+                '''
+                #####
+                print("sil_pred.shape: ", result["sil_pred"].shape)
+                print("sil_gt.shape: ", result["sil_gt"].shape)
+                print("img.shape", result["img"].shape)
+                print("seg_gt.shape", result["seg_gt"].shape)
+                # print("verts.shape", res["verts"].shape)
+                print("image_feat.shape", result["image_feat"].shape)
+                sil_pts_gt = result["sil_pts_gt"]
+                sil_pts_pred = result["sil_pts_pred"]
+                print("sil_pts_gt.shape", sil_pts_gt.shape)
+                print("sil_pts_pred.shape", sil_pts_pred.shape)
+
+
+                import matplotlib.pyplot as plt
+                fig, axs = plt.subplots(2)
+                axs[0].imshow(result["img"][0])
+                seg_np = np.squeeze(result["seg_gt"][0], axis=2)
+                axs[1].imshow(seg_np)
+                axs[1].plot(sil_pts_gt[:,0], sil_pts_gt[:,1], 'bo')
+                #axs[1].plot(sil_pts_pred[:,0], sil_pts_pred[:,1], 'ro')
+
+                plt.show()
+                #####
+                '''
 
                 self.summary_writer.add_summary(
                     result['summary'], global_step=result['step'])
