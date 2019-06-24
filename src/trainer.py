@@ -122,10 +122,17 @@ class HMRTrainer(object):
         print("array: ", np.arange(num2show / 2), "...", self.batch_size - np.arange(3) - 1)
         print("np_stack: ", np.hstack(
             [np.arange(num2show / 2), self.batch_size - np.arange(3) - 1]))
-        show_these_np = np.hstack(
-            [np.arange(num2show / 2), self.batch_size - np.arange(3) - 1])
-        print("SHOW THESE NP: ", show_these_np)
-        self.show_these = tf.constant(show_these_np, tf.int32)
+        #TODO: find out at which batch size 'show_these_np' contains negative indices
+        #       set it to [0] if it contains negative indices
+        if(self.batch_size > 1):
+            show_these_np = np.hstack(
+                [np.arange(num2show / 2), self.batch_size - np.arange(3) - 1])
+            print("SHOW THESE NP: ", show_these_np)
+            self.show_these = tf.constant(show_these_np, tf.int32)
+        else:
+            show_these_np = np.array([0])
+            print("SHOW THESE NP: ", show_these_np)
+            self.show_these = tf.constant(show_these_np, tf.int32)
 
         # Model spec
         self.model_type = config.model_type
@@ -229,6 +236,9 @@ class HMRTrainer(object):
             self.image, weight_decay=self.e_wd, reuse=False)
 
         loss_kps = []
+        ab_dists = []
+        ba_dists = []
+
         if self.use_3d_label:
             loss_3d_joints, loss_3d_params = [], []
         # For discriminator
@@ -240,6 +250,7 @@ class HMRTrainer(object):
         # For visualizations
         self.all_verts = []
         self.all_pred_kps = []
+        self.all_pred_silhouettes = []
         self.all_pred_cams = []
         self.all_delta_thetas = []
         self.all_theta_prev = []
@@ -248,6 +259,9 @@ class HMRTrainer(object):
         for i in np.arange(self.num_stage):
             print('Iteration %d' % i)
             # ---- Compute outputs
+            print("img_feat: ", self.img_feat)
+
+            print("theta_prev: ", theta_prev)
             state = tf.concat([self.img_feat, theta_prev], 1)
 
             if i == 0:
@@ -300,22 +314,24 @@ class HMRTrainer(object):
             '''
 
 
+            pred_kp = batch_orth_proj_idrot(
+                Js, cams, name='proj2d_stage%d' % i)
             if(not MESH_REPROJECTION_LOSS):
-                pred_kp = batch_orth_proj_idrot(
-                    Js, cams, name='proj2d_stage%d' % i)
                 loss_kps.append(self.e_loss_weight * self.keypoint_loss(
                         self.kp_gt, pred_kp))
-            else:
+            if(MESH_REPROJECTION_LOSS):
                 print("seg_gt: ", self.seg_gt)
                 silhouette_gt = tf.where(tf.greater(self.seg_gt, 0.))[:, :3]
                 #silhouette_gt = get_sil(self.seg_gt)
                 silhouette_pred = reproject_vertices(verts, cams,
-                                                     self.image.shape.as_list()[1:3])
+                                                     self.image.shape.as_list()[1:3], name='mesh_reproject_stage%d' % i)
                 print("silhouette_gt: ", silhouette_gt)
                 print("silhouette_pred: ", silhouette_pred)
-
-                loss_kps.append(self.e_loss_weight * self.mesh_repro_loss(
-                    silhouette_gt, silhouette_pred, self.batch_size))
+                repro_loss, ba_dist, ab_dist = self.mesh_repro_loss(
+                    silhouette_gt, silhouette_pred, self.batch_size, name='mesh_repro_loss' % i)
+                loss_kps.append(self.e_loss_weight * repro_loss)
+                ba_dists.append(ba_dist)
+                ab_dists.append(ab_dist)
 
             pred_Rs = tf.reshape(pred_Rs, [-1, 24, 9])
             if self.use_3d_label:
@@ -330,8 +346,10 @@ class HMRTrainer(object):
 
             # Save things for visualiations:
             self.all_verts.append(tf.gather(verts, self.show_these))
-            if(not MESH_REPROJECTION_LOSS):
-                self.all_pred_kps.append(tf.gather(pred_kp, self.show_these))
+            #if(not MESH_REPROJECTION_LOSS):
+            self.all_pred_kps.append(tf.gather(pred_kp, self.show_these))
+            if(MESH_REPROJECTION_LOSS):
+                self.all_pred_silhouettes.append(tf.gather(silhouette_pred, self.show_these))
             self.all_pred_cams.append(tf.gather(cams, self.show_these))
 
             # Finally update to end iteration.
@@ -344,6 +362,8 @@ class HMRTrainer(object):
         with tf.name_scope("gather_e_loss"):
             # Just the last loss.
             self.e_loss_kp = loss_kps[-1]
+            self.ab_dists = ab_dists[-1]
+            self.ba_dists = ba_dists[-1]
 
             if self.encoder_only:
                 self.e_loss = self.e_loss_kp
@@ -364,17 +384,23 @@ class HMRTrainer(object):
         # For visualizations, only save selected few into:
         # B x T x ...
         self.all_verts = tf.stack(self.all_verts, axis=1)
-        if(not MESH_REPROJECTION_LOSS):
-            self.all_pred_kps = tf.stack(self.all_pred_kps, axis=1)
+        #if(not MESH_REPROJECTION_LOSS):
+        self.all_pred_kps = tf.stack(self.all_pred_kps, axis=1)
+        self.show_kps = tf.gather(self.kp_gt, self.show_these)
+        if(MESH_REPROJECTION_LOSS):
+            #self.all_pred_silhouettes = tf.stack(self.all_pred_silhouettes, axis=1)
+            self.show_segs = tf.gather(self.seg_gt, self.show_these)
         self.all_pred_cams = tf.stack(self.all_pred_cams, axis=1)
         self.show_imgs = tf.gather(self.image, self.show_these)
-        self.show_segs = tf.gather(self.seg_gt, self.show_these)
+
+
+        '''
         if(not MESH_REPROJECTION_LOSS):
             with tf.Session() as sess:
                 print("kp_gt: ", self.kp_gt.eval(session=sess))
                 print("show_these: ", self.show_these.eval(session=sess))
-                self.show_kps = tf.gather(self.kp_gt, self.show_these)
-
+                
+        '''
         # Don't forget to update batchnorm's moving means.
         print('collecting batch norm moving means!!')
         bn_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
@@ -404,6 +430,8 @@ class HMRTrainer(object):
         always_report = [
             tf.summary.scalar("loss/e_loss_kp_noscale",
                               self.e_loss_kp / self.e_loss_weight),
+            tf.summary.scalar("ab_dist", self.ab_dists),
+            tf.summary.scalar("ba_dist", self.ba_dists),
             tf.summary.scalar("loss/e_loss", self.e_loss),
         ]
         if self.encoder_only:
@@ -527,7 +555,8 @@ class HMRTrainer(object):
 
         return loss_poseshape, loss_joints
 
-    def visualize_img(self, img, seg, gt_kp, vert, pred_kp, cam, renderer):
+    def visualize_img(self, img, seg_gt, gt_kp, vert, pred_kp, cam, renderer):
+   # def visualize_img(self, img, gt_kp, vert, pred_kp, cam, renderer):
         """
         Overlays gt_kp and pred_kp on img.
         Draws vert with text.
@@ -555,11 +584,13 @@ class HMRTrainer(object):
 
 
         # seg gt needs to be same dimension as color image.
-        seg = seg.squeeze()
-        seg2 = np.stack((seg,seg,seg), axis=2)
-        rend_seg = renderer(vert + cam_t, cam_for_render, img=seg2)
+        seg_gt = seg_gt.squeeze()
+        seg2_gt = np.stack((seg_gt,seg_gt,seg_gt), axis=2)
+        rend_seg_gt = renderer(vert + cam_t, cam_for_render, img=seg2_gt)
 
-        combined = np.hstack([skel_img, rend_img / 255., rend_seg / 255.])
+
+        combined = np.hstack([skel_img, rend_img / 255., rend_seg_gt / 255.])
+        #combined = np.hstack([skel_img, rend_img / 255.])
         return combined
 
 
@@ -570,7 +601,7 @@ class HMRTrainer(object):
 
         # This is B x H x W x 3
         imgs = result["input_img"]
-        segs = result["seg"]
+        segs_gt = result["seg_gt"]
         # B x 19 x 3
         gt_kps = result["gt_kp"]
         if self.data_format == 'NCHW':
@@ -584,13 +615,25 @@ class HMRTrainer(object):
 
         img_summaries = []
 
-        for img_id, (img, seg, gt_kp, verts, joints, cams) in enumerate(
-                zip(imgs, segs, gt_kps, est_verts, joints, cams)):
+        #print("imgs: ", imgs)
+        #print("segs_gt: ", segs_gt)
+        #print("gt_kps: : ", gt_kps)
+        #print("est_verts: ", est_verts)
+        #print("joints: ", joints)
+        #print("cams: : ", cams)
+        #for img_id, (img, gt_kp, verts, joints, cams) in enumerate(
+        for img_id, (img, seg_gt, gt_kp, verts, joints, cams) in enumerate(
+        #        zip(imgs, gt_kps, est_verts, joints, cams)):
+                zip(imgs, segs_gt, gt_kps, est_verts, joints, cams)):
+            print("IN FOR LOOP")
             # verts, joints, cams are a list of len T.
             all_rend_imgs = []
             for vert, joint, cam in zip(verts, joints, cams):
-                rend_img = self.visualize_img(img, seg, gt_kp, vert, joint, cam,
+
+                rend_img = self.visualize_img(img, seg_gt, gt_kp, vert, joint, cam,
                                               self.renderer)
+                #rend_img = self.visualize_img(img, gt_kp, vert, joint, cam,
+                #                              self.renderer)
                 all_rend_imgs.append(rend_img)
             combined = np.vstack(all_rend_imgs)
 
@@ -606,6 +649,7 @@ class HMRTrainer(object):
             sio.flush()
             sio.close()
             plt.close()
+            print("img_summaries.append")
             img_summaries.append(
                 tf.Summary.Value(tag="vis_images/%d" % img_id, image=vis_sum))
 
@@ -614,7 +658,7 @@ class HMRTrainer(object):
             img_summary, global_step=result['step'])
 
         ###
-        self.summary_writer.close()
+        #self.summary_writer.close()
         ###
 
     def train(self):
@@ -639,15 +683,27 @@ class HMRTrainer(object):
                     "loss_kp": self.e_loss_kp
                 }
 
-                if step % self.log_img_step == 0:
-                    fetch_dict.update({
-                        "input_img": self.show_imgs,
-                        #"gt_kp": self.show_kps,
-                        "seg": self.show_segs,
-                        "e_verts": self.all_verts,
-                        "joints": self.all_pred_kps,
-                        "cam": self.all_pred_cams,
-                    })
+                if(not MESH_REPROJECTION_LOSS):
+                    if step % self.log_img_step == 0:
+                        fetch_dict.update({
+                            "input_img": self.show_imgs,
+                            "gt_kp": self.show_kps,
+                            "e_verts": self.all_verts,
+                            "seg_gt": self.all_pred_silhouettes,
+                            "joints": self.all_pred_kps,
+                            "cam": self.all_pred_cams,
+                        })
+                else:
+                    if step % self.log_img_step == 0:
+                        fetch_dict.update({
+                            "input_img": self.show_imgs,
+                            "gt_kp": self.show_kps,
+                            "seg_gt": self.show_segs,
+                            "e_verts": self.all_verts,
+                            "joints": self.all_pred_kps,
+                            #"seg": self.all_pred_silhouettes,
+                            "cam": self.all_pred_cams,
+                        })
 
 
                 t0 = time()
@@ -675,6 +731,7 @@ class HMRTrainer(object):
                         self.summary_writer.add_summary(
                             result['summary_occasional'],
                             global_step=result['step'])
+                    print("DRAWING")
                     self.draw_results(result)
 
                 self.summary_writer.flush()

@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 from src.util import renderer as vis_util
 from src.util import image as img_util
 from src.util import openpose as op_util
+import src.config as config
 from src.config import get_config, prepare_dirs, save_config
 from src.data_loader import DataLoader
 from src.RunModel import RunModel
@@ -31,7 +32,7 @@ def main(config):
         #smpl_loader = data_loader.get_smpl_loader()
 
    
-    num_epochs = 100  
+    num_epochs = config.epoch
     
     dataset = dataset.repeat(num_epochs)
 #    iterator = dataset.make_one_shot_iterator()

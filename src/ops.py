@@ -23,6 +23,7 @@ def keypoint_l1_loss(kp_gt, kp_pred, scale=1., name=None):
         kp_pred = tf.reshape(kp_pred, (-1, 2))
 
         vis = tf.expand_dims(tf.cast(kp_gt[:, 2], tf.float32), 1)
+        print(kp_gt[:,2], kp_pred, vis)
         res = tf.losses.absolute_difference(kp_gt[:, :2], kp_pred, weights=vis)
         return res
 
@@ -141,7 +142,7 @@ def bidirectional_dist(A, B):
     # print(distances_BA.sum()+distances_AB.sum())
     # print(tf.math.add(summed_dist_BA, summed_dist_AB).eval())
 
-    return tf.math.add(summed_dist_BA, summed_dist_AB)
+    return tf.math.add(summed_dist_BA, summed_dist_AB), summed_dist_BA, summed_dist_AB
 
 
 def mesh_reprojection_loss(silhouette_gt, silhouette_pred, batch_size, name=None):
@@ -154,21 +155,25 @@ def mesh_reprojection_loss(silhouette_gt, silhouette_pred, batch_size, name=None
 
 
     """
-    with tf.name_scope(name, "mesh_reprojection_loss", [silhouette_gt, silhouette_pred]): 
+    with tf.name_scope(name, "mesh_reprojection_loss", [silhouette_gt, silhouette_pred]):
         #K = silhouette_gt.shape[1]
       #  silhouette_gt = tf.reshape(silhouette_gt, (-1, 2))
       #  silhouette_pred = tf.reshape(silhouette_pred, (-1, 2))
       #  sil_gt_np = silhouette_gt.eval()
       #  sil_pred_np = silhouette_pred.eval()
         print("silhouette_gt!!!!!!!!!!!!!!!", silhouette_gt)
-        if(batch_size==1):
-            loss = bidirectional_dist(tf.gather_nd(silhouette_gt,
-                                                    tf.where(tf.equal(silhouette_gt[:,0], 0)))[:, 1:], silhouette_pred[0,:,:])
-        else:
-            loss = tf.Variable(0.) # variable?
-            for i in range(batch_size):
-
-                loss = tf.math.add(loss,
-                        bidirectional_dist(tf.gather_nd(silhouette_gt,
-                                                        tf.where(tf.equal(silhouette_gt[:,0], i)))[:, 1:], silhouette_pred[i,:,:]))
-        return loss
+        #if(batch_size==1):
+            #loss = bidirectional_dist(tf.gather_nd(silhouette_gt,
+             #                                       tf.where(tf.equal(silhouette_gt[:,0], 0)))[:, 1:], silhouette_pred[0,:,:])
+        #else:
+        loss = tf.Variable(0.) # variable?
+        ab_all = tf.Variable(0.) # variable?
+        ba_all = tf.Variable(0.) # variable?
+        for i in range(batch_size):
+            bi_loss, ba, ab = bidirectional_dist(tf.gather_nd(silhouette_gt,
+                                            tf.where(tf.equal(silhouette_gt[:, 0], i)))[:, 1:],
+                               silhouette_pred[i, :, :])
+            loss = tf.math.add(loss, bi_loss)
+            ab_all = tf.math.add(ab_all, ab)
+            ba_all = tf.math.add(ba_all, ba)
+        return loss, ab_all, ba_all

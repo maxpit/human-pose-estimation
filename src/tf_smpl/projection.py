@@ -31,7 +31,7 @@ def batch_orth_proj_idrot(X, camera, name=None):
         return tf.reshape(
             camera[:, :, 0] * tf.reshape(X_trans, [shape[0], -1]), shape)
 
-def reproject_vertices(verts, cam, im_size):
+def reproject_vertices(verts, cam, im_size, name=None):
     """
     :argument:
         verts:      N x 6890(num vertices) x 3
@@ -39,20 +39,21 @@ def reproject_vertices(verts, cam, im_size):
     :returns:
         verts_im:   N x 6890 x 2
     """
-    print("VERTS!!!!!!:",verts)
-    print("CAM!!!!!!!!:",cam)
-    verts_reprojected = batch_orth_proj_idrot(verts, cam)
-    print("VERTS again", verts_reprojected)
-    verts_calc = tf.multiply(tf.add(verts_reprojected,
-                                      tf.ones_like(verts_reprojected)), 0.5)
-    print("Verts calc", verts_calc)
-    print("image size", im_size)
-    print("constant im size", tf.constant([im_size[0], im_size[1]]))
-    verts_calc = tf.multiply(verts_calc, im_size)
-    #verts_im = tf.cast(verts_calc, tf.int32)
-    #print("verts_im", verts_im)
-    #TODO check whether multiplication is right
-    return verts_calc
+    with tf.name_scope(name, "mesh_reproject", [verts, cam, im_size]):
+        print("VERTS!!!!!!:",verts)
+        print("CAM!!!!!!!!:",cam)
+        verts_reprojected = batch_orth_proj_idrot(verts, cam)
+        print("VERTS again", verts_reprojected)
+        verts_calc = tf.multiply(tf.add(verts_reprojected,
+                                          tf.ones_like(verts_reprojected)), 0.5)
+        print("Verts calc", verts_calc)
+        print("image size", im_size)
+        print("constant im size", tf.constant([im_size[0], im_size[1]]))
+        verts_calc = tf.multiply(verts_calc, im_size)
+        #verts_im = tf.cast(verts_calc, tf.int32)
+        #print("verts_im", verts_im)
+        #TODO check whether multiplication is right
+        return verts_calc
 
 """
 def reproject_vertices(proc_param, verts, cam, im_size):
