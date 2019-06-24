@@ -31,7 +31,7 @@ import deepdish as dd
 from .util import renderer as vis_util
 #from .util.data_utils import get_silhouette_from_seg_im as get_sil
 
-MESH_REPROJECTION_LOSS=True
+MESH_REPROJECTION_LOSS=False
 
 class HMRTrainer(object):
     def __init__(self, config, dataset, mocap_loader = None):
@@ -362,8 +362,8 @@ class HMRTrainer(object):
         with tf.name_scope("gather_e_loss"):
             # Just the last loss.
             self.e_loss_kp = loss_kps[-1]
-            self.ab_dists = ab_dists[-1]
-            self.ba_dists = ba_dists[-1]
+            #self.ab_dists = ab_dists[-1]
+            #self.ba_dists = ba_dists[-1]
 
             if self.encoder_only:
                 self.e_loss = self.e_loss_kp
@@ -430,8 +430,8 @@ class HMRTrainer(object):
         always_report = [
             tf.summary.scalar("loss/e_loss_kp_noscale",
                               self.e_loss_kp / self.e_loss_weight),
-            tf.summary.scalar("ab_dist", self.ab_dists),
-            tf.summary.scalar("ba_dist", self.ba_dists),
+            #tf.summary.scalar("ab_dist", self.ab_dists),
+            #tf.summary.scalar("ba_dist", self.ba_dists),
             tf.summary.scalar("loss/e_loss", self.e_loss),
         ]
         if self.encoder_only:
