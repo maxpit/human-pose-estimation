@@ -24,6 +24,7 @@ def num_examples(datasets):
         'lsp': 1000,
         'lsp_ext': 10000,
         'lsp_single': 1,
+        'lsp_single_new': 1,
         'mpii': 20000,
         'h36m': 312188,
         'coco': 79344,
@@ -79,11 +80,11 @@ class DataLoader(object):
         print(files)
 
         dataset = self.read_data(files)
-      
+
         dataset = dataset.shuffle(buffer_size=10000)
         dataset = dataset.batch(self.batch_size)
-        
-        return dataset 
+
+        return dataset
 
     def get_smpl_loader(self):
         """
@@ -166,14 +167,14 @@ class DataLoader(object):
             keypoints = label[:2, :]
 
             # Randomly shift center.
-            print('Using translation jitter: %d' % self.trans_max)
-            center = data_utils.jitter_center(center, self.trans_max)
-            print("shifted center")
+#            print('Using translation jitter: %d' % self.trans_max)
+#            center = data_utils.jitter_center(center, self.trans_max)
+#            print("shifted center")
 
             # randomly scale image.
-            image, seg_gt, keypoints, center = data_utils.jitter_scale(
-                image, seg_gt, image_size, keypoints, center, self.scale_range)
-            print("scaled image")
+#            image, seg_gt, keypoints, center = data_utils.jitter_scale(
+#                image, seg_gt, image_size, keypoints, center, self.scale_range)
+#            print("scaled image")
 
             # Pad image with safe margin.
             # Extra 50 for safety.
@@ -200,15 +201,15 @@ class DataLoader(object):
 
             crop_kp = tf.stack([x_crop, y_crop, visibility])
 
-            print("before random flip")
-            print("crop", crop)
-            print("crop_gt", crop_gt)
-            print("crop_kp", crop_kp)
-            if pose is not None and gt3d is not None:
-                crop, crop_gt, crop_kp, new_pose, new_gt3d = data_utils.random_flip(
-                    crop, crop_gt, crop_kp, pose, gt3d)
-            else:
-                crop, crop_gt, crop_kp = data_utils.random_flip(crop, crop_gt, crop_kp)
+#            print("before random flip")
+#            print("crop", crop)
+#            print("crop_gt", crop_gt)
+#            print("crop_kp", crop_kp)
+#            if pose is not None and gt3d is not None:
+#                crop, crop_gt, crop_kp, new_pose, new_gt3d = data_utils.random_flip(
+#                    crop, crop_gt, crop_kp, pose, gt3d)
+#            else:
+#                crop, crop_gt, crop_kp = data_utils.random_flip(crop, crop_gt, crop_kp)
 
             # Normalize kp output to [-1, 1]
             final_vis = tf.cast(crop_kp[2, :] > 0, tf.float32)
@@ -218,11 +219,10 @@ class DataLoader(object):
             ])
             # Preserving non_vis to be 0.
             final_label = final_vis * final_label
-            
+
             final_label = tf.transpose(final_label)
             # rescale image from [0, 1] to [-1, 1]
-            
-            
+
             crop = self.image_normalizing_fn(crop)
             if pose is not None and gt3d is not None:
                 return crop, crop_gt, final_label, new_pose, new_gt3d
