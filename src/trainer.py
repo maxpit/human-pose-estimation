@@ -31,8 +31,6 @@ import deepdish as dd
 from .util import renderer as vis_util
 #from .util.data_utils import get_silhouette_from_seg_im as get_sil
 
-MESH_REPROJECTION_LOSS=False
-
 class HMRTrainer(object):
     def __init__(self, config, dataset, mocap_loader = None):
         """
@@ -77,6 +75,7 @@ class HMRTrainer(object):
 
         self.num_theta = 72  # 24 * 3
         self.total_params = self.num_theta + self.num_cam + 10
+        self.use_mesh_repro_loss = config.use_mesh_repro_loss
 
         # Data
         num_images = num_examples(config.datasets)
@@ -316,10 +315,10 @@ class HMRTrainer(object):
 
             pred_kp = batch_orth_proj_idrot(
                 Js, cams, name='proj2d_stage%d' % i)
-            if(not MESH_REPROJECTION_LOSS):
+            if(not self.use_mesh_repro_loss):
                 loss_kps.append(self.e_loss_weight * self.keypoint_loss(
                         self.kp_gt, pred_kp))
-            if(MESH_REPROJECTION_LOSS):
+            if(self.use_mesh_repro_loss):
                 print("seg_gt: ", self.seg_gt)
                 silhouette_gt = tf.where(tf.greater(self.seg_gt, 0.))[:, :3]
                 #silhouette_gt = get_sil(self.seg_gt)
@@ -346,9 +345,9 @@ class HMRTrainer(object):
 
             # Save things for visualiations:
             self.all_verts.append(tf.gather(verts, self.show_these))
-            #if(not MESH_REPROJECTION_LOSS):
+            #if(not self.use_mesh_repro_loss):
             self.all_pred_kps.append(tf.gather(pred_kp, self.show_these))
-            if(MESH_REPROJECTION_LOSS):
+            if(self.use_mesh_repro_loss):
                 self.all_pred_silhouettes.append(tf.gather(silhouette_pred, self.show_these))
             self.all_pred_cams.append(tf.gather(cams, self.show_these))
 
@@ -384,10 +383,10 @@ class HMRTrainer(object):
         # For visualizations, only save selected few into:
         # B x T x ...
         self.all_verts = tf.stack(self.all_verts, axis=1)
-        #if(not MESH_REPROJECTION_LOSS):
+        #if(not self.use_mesh_repro_loss):
         self.all_pred_kps = tf.stack(self.all_pred_kps, axis=1)
         self.show_kps = tf.gather(self.kp_gt, self.show_these)
-        if(MESH_REPROJECTION_LOSS):
+        if(self.use_mesh_repro_loss):
             #self.all_pred_silhouettes = tf.stack(self.all_pred_silhouettes, axis=1)
             self.show_segs = tf.gather(self.seg_gt, self.show_these)
         self.all_pred_cams = tf.stack(self.all_pred_cams, axis=1)
@@ -395,7 +394,7 @@ class HMRTrainer(object):
 
 
         '''
-        if(not MESH_REPROJECTION_LOSS):
+        if(not self.use_mesh_repro_loss):
             with tf.Session() as sess:
                 print("kp_gt: ", self.kp_gt.eval(session=sess))
                 print("show_these: ", self.show_these.eval(session=sess))
@@ -555,8 +554,7 @@ class HMRTrainer(object):
 
         return loss_poseshape, loss_joints
 
-    def visualize_img(self, img, seg_gt, gt_kp, vert, pred_kp, cam, renderer):
-   # def visualize_img(self, img, gt_kp, vert, pred_kp, cam, renderer):
+    def visualize_img(self, img, gt_kp, vert, pred_kp, cam, renderer, seg_gt=None):
         """
         Overlays gt_kp and pred_kp on img.
         Draws vert with text.
@@ -582,15 +580,14 @@ class HMRTrainer(object):
             input_img, gt_joint, draw_edges=False, vis=gt_vis)
         skel_img = vis_util.draw_skeleton(img_with_gt, pred_joint)
 
-
-        # seg gt needs to be same dimension as color image.
-        seg_gt = seg_gt.squeeze()
-        seg2_gt = np.stack((seg_gt,seg_gt,seg_gt), axis=2)
-        rend_seg_gt = renderer(vert + cam_t, cam_for_render, img=seg2_gt)
-
-
-        combined = np.hstack([skel_img, rend_img / 255., rend_seg_gt / 255.])
-        #combined = np.hstack([skel_img, rend_img / 255.])
+        if(self.use_mesh_repro_loss):
+            # seg gt needs to be same dimension as color image.
+            seg_gt = seg_gt.squeeze()
+            seg2_gt = np.stack((seg_gt,seg_gt,seg_gt), axis=2)
+            rend_seg_gt = renderer(vert + cam_t, cam_for_render, img=seg2_gt)
+            combined = np.hstack([skel_img, rend_img / 255., rend_seg_gt / 255.])
+        else:
+            combined = np.hstack([skel_img, rend_img / 255.])
         return combined
 
 
@@ -615,25 +612,21 @@ class HMRTrainer(object):
 
         img_summaries = []
 
-        #print("imgs: ", imgs)
-        #print("segs_gt: ", segs_gt)
-        #print("gt_kps: : ", gt_kps)
-        #print("est_verts: ", est_verts)
-        #print("joints: ", joints)
-        #print("cams: : ", cams)
-        #for img_id, (img, gt_kp, verts, joints, cams) in enumerate(
+        if(not self.use_mesh_repro_loss):
+            segs_gt = np.empty_like(imgs)
+
         for img_id, (img, seg_gt, gt_kp, verts, joints, cams) in enumerate(
-        #        zip(imgs, gt_kps, est_verts, joints, cams)):
                 zip(imgs, segs_gt, gt_kps, est_verts, joints, cams)):
-            print("IN FOR LOOP")
             # verts, joints, cams are a list of len T.
             all_rend_imgs = []
             for vert, joint, cam in zip(verts, joints, cams):
 
-                rend_img = self.visualize_img(img, seg_gt, gt_kp, vert, joint, cam,
-                                              self.renderer)
-                #rend_img = self.visualize_img(img, gt_kp, vert, joint, cam,
-                #                              self.renderer)
+                if(self.use_mesh_repro_loss):
+                    rend_img = self.visualize_img(img, gt_kp, vert, joint, cam,
+                                                  self.renderer, seg_gt)
+                else:
+                    rend_img = self.visualize_img(img, gt_kp, vert, joint, cam,
+                                                  self.renderer)
                 all_rend_imgs.append(rend_img)
             combined = np.vstack(all_rend_imgs)
 
@@ -683,7 +676,7 @@ class HMRTrainer(object):
                     "loss_kp": self.e_loss_kp
                 }
 
-                if(not MESH_REPROJECTION_LOSS):
+                if(not self.use_mesh_repro_loss):
                     if step % self.log_img_step == 0:
                         fetch_dict.update({
                             "input_img": self.show_imgs,
