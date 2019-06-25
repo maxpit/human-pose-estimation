@@ -148,6 +148,8 @@ class HMRTrainer(object):
         self.d_loss_weight = config.d_loss_weight
         self.e_3d_weight = config.e_3d_weight
 
+        self.mr_loss_weight = config.mr_loss_weight
+
         self.optimizer = tf.train.AdamOptimizer
 
         # Instantiate SMPL
@@ -234,9 +236,8 @@ class HMRTrainer(object):
         self.img_feat, self.E_var = img_enc_fn(
             self.image, weight_decay=self.e_wd, reuse=False)
 
+        loss_mr = []
         loss_kps = []
-        ab_dists = []
-        ba_dists = []
 
         if self.use_3d_label:
             loss_3d_joints, loss_3d_params = [], []
@@ -322,9 +323,11 @@ class HMRTrainer(object):
                 print("silhouette_pred: ", silhouette_pred)
                 repro_loss, ba_dist, ab_dist, self.sil_pts_gt, self.sil_pts_pred = self.mesh_repro_loss(
                     silhouette_gt, silhouette_pred, self.batch_size, name='mesh_repro_loss' % i)
-                loss_kps.append(self.e_loss_weight * repro_loss)
-                ba_dists.append(ba_dist)
-                ab_dists.append(ab_dist)
+                repro_loss_scaled = repro_loss * self.mr_loss_weight
+                kp_loss = self.keypoint_loss(self.kp_gt, pred_kp)
+
+                loss_kps.append(kp_loss)
+                loss_mr.append(repro_loss_scaled)
 
             pred_Rs = tf.reshape(pred_Rs, [-1, 24, 9])
             if self.use_3d_label:
@@ -355,11 +358,10 @@ class HMRTrainer(object):
         with tf.name_scope("gather_e_loss"):
             # Just the last loss.
             self.e_loss_kp = loss_kps[-1]
-            #self.ab_dists = ab_dists[-1]
-            #self.ba_dists = ba_dists[-1]
+            self.e_loss_mr = loss_mr[-1]
 
             if self.encoder_only:
-                self.e_loss = self.e_loss_kp
+                self.e_loss = self.e_loss_kp + self.e_loss_mr
             else:
                 self.e_loss = self.d_loss_weight * self.e_loss_disc + self.e_loss_kp
 
@@ -423,8 +425,8 @@ class HMRTrainer(object):
         always_report = [
             tf.summary.scalar("loss/e_loss_kp_noscale",
                               self.e_loss_kp / self.e_loss_weight),
-            #tf.summary.scalar("ab_dist", self.ab_dists),
-            #tf.summary.scalar("ba_dist", self.ba_dists),
+            tf.summary.scalar("loss/e_loss_mr_noscale", self.e_loss_mr /
+                              self.e_loss_weight),
             tf.summary.scalar("loss/e_loss", self.e_loss),
         ]
         if self.encoder_only:

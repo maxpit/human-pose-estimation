@@ -178,7 +178,9 @@ def mesh_reprojection_loss(silhouette_gt, silhouette_pred, batch_size, name=None
 
             bi_loss, ba, ab = bidirectional_dist(silhouette_points_gt,
                                silhouette_pred[i, :, :])
-            loss = tf.math.add(loss, bi_loss)
+            bi_loss_scaled = bi_loss/(silhouette_gt.shape.as_list()[1] +
+                                      silhouette_pred.shape.as_list()[1])
+            loss = tf.math.add(loss, bi_loss_scaled)
             ab_all = tf.math.add(ab_all, ab)
             ba_all = tf.math.add(ba_all, ba)
         return loss, ab_all, ba_all, tf.stack([tf.gather_nd(silhouette_gt,
