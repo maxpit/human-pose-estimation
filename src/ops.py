@@ -136,7 +136,8 @@ def bidirectional_dist(A, B):
 
     # compute distances
     dist_BA = tf.norm(tf.to_float(B) - tf.to_float(tf.gather(A, ind_BA)), axis=1)
-    dist_AB = tf.norm(tf.to_float(A) - tf.to_float(tf.gather(B, ind_AB)), axis=1)
+    #dist_AB = tf.norm(tf.to_float(A) - tf.to_float(tf.gather(B, ind_AB)), axis=1)
+    dist_AB = tf.reduce_sum(tf.abs(tf.to_float(A) - tf.to_float(tf.gather(B, ind_AB))))
     summed_dist_BA = tf.reduce_sum(dist_BA)
     summed_dist_AB = tf.reduce_sum(dist_AB)
     # print(distances_BA.sum()+distances_AB.sum())

@@ -24,6 +24,9 @@ from time import time
 import tensorflow as tf
 import numpy as np
 
+from tensorflow.python.ops import resources
+from tensorflow.python.ops import variables
+
 from os.path import join, dirname
 import deepdish as dd
 
@@ -32,7 +35,7 @@ from .util import renderer as vis_util
 #from .util.data_utils import get_silhouette_from_seg_im as get_sil
 
 class HMRTrainer(object):
-    def __init__(self, config, dataset, mocap_loader = None):
+    def __init__(self, config, train_dataset, test_dataset, mocap_loader = None):
         """
         Args:
           config
@@ -44,6 +47,9 @@ class HMRTrainer(object):
         """
         # Config + path
         self.config = config
+
+        self.train_dataset = train_dataset
+        self.test_dataset = test_dataset
 
         self.model_dir = config.model_dir
         print('model dir: %s', self.model_dir)
@@ -76,6 +82,7 @@ class HMRTrainer(object):
         self.num_theta = 72  # 24 * 3
         self.total_params = self.num_theta + self.num_cam + 10
         self.use_mesh_repro_loss = config.use_mesh_repro_loss
+        self.use_kp_loss= config.use_kp_loss
 
         # Data
         num_images = num_examples(config.datasets)
@@ -86,52 +93,8 @@ class HMRTrainer(object):
         self.num_itr_per_epoch = num_images / self.batch_size
         self.num_mocap_itr_per_epoch = num_mocap / self.batch_size
 
-
-        iterator = dataset.make_one_shot_iterator()
-
-        # Formats
-        # image: B x H x W x 3
-        # seg_gt: B x H x W x 1
-        # kp_gt: B x 19 x 3
-        self.image, self.seg_gt, self.kp_gt = iterator.get_next()
-        self.a = tf.reshape(self.kp_gt, (-1,3))
-        # First make sure data_format is right
-        if self.data_format == 'NCHW':
-            # B x H x W x 3 --> B x 3 x H x W
-            self.image = tf.transpose(self.image, [0, 3, 1, 2])
-            self.seg_gt = tf.transpose(self.seg_gt, [0, 3, 1, 2])
-
-#        if self.use_3d_label:
-#            self.poseshape_loader = data_loader['label3d']
-#            # image_loader[3] is N x 2, first column is 3D_joints gt existence,
-#            # second column is 3D_smpl gt existence
-#            self.has_gt3d_joints = data_loader['has3d'][:, 0]
-#            self.has_gt3d_smpl = data_loader['has3d'][:, 1]
-
-        #self.pose_loader = mocap_loader[0]
-        #self.shape_loader = mocap_loader[1]
-
         self.global_step = tf.Variable(0, name='global_step', trainable=False)
         self.log_img_step = config.log_img_step
-
-        # For visualization:
-        num2show = np.minimum(6, self.batch_size)
-        # Take half from front & back
-        print("batch size: ", self.batch_size)
-        print("array: ", np.arange(num2show / 2), "...", self.batch_size - np.arange(3) - 1)
-        print("np_stack: ", np.hstack(
-            [np.arange(num2show / 2), self.batch_size - np.arange(3) - 1]))
-        #TODO: find out at which batch size 'show_these_np' contains negative indices
-        #       set it to [0] if it contains negative indices
-        if(self.batch_size > 1):
-            show_these_np = np.hstack(
-                [np.arange(num2show / 2), self.batch_size - np.arange(3) - 1])
-            print("SHOW THESE NP: ", show_these_np)
-            self.show_these = tf.constant(show_these_np, tf.int32)
-        else:
-            show_these_np = np.array([0])
-            print("SHOW THESE NP: ", show_these_np)
-            self.show_these = tf.constant(show_these_np, tf.int32)
 
         # Model spec
         self.model_type = config.model_type
@@ -150,44 +113,10 @@ class HMRTrainer(object):
 
         self.mr_loss_weight = config.mr_loss_weight
 
-        self.optimizer = tf.train.AdamOptimizer
-
-        # Instantiate SMPL
-        self.smpl = SMPL(self.smpl_model_path)
-        self.E_var = []
-        self.build_model()
-
-        # Logging
-        init_fn = None
-        if self.use_pretrained():
-            # Make custom init_fn
-            print("Fine-tuning from %s" % self.pretrained_model_path)
-            if 'resnet_v2_50' in self.pretrained_model_path:
-                resnet_vars = [
-                    var for var in self.E_var if 'resnet_v2_50' in var.name
-                ]
-                self.pre_train_saver = tf.train.Saver(resnet_vars)
-            elif 'pose-tensorflow' in self.pretrained_model_path:
-                resnet_vars = [
-                    var for var in self.E_var if 'resnet_v1_101' in var.name
-                ]
-                self.pre_train_saver = tf.train.Saver(resnet_vars)
-            else:
-                self.pre_train_saver = tf.train.Saver()
-
-            def load_pretrain(sess):
-                self.pre_train_saver.restore(sess, self.pretrained_model_path)
-
-            init_fn = load_pretrain
-
         self.sess_config = tf.ConfigProto()
         self.sess_config.gpu_options.per_process_gpu_memory_fraction = 0.88
 
-        self.summary_writer = tf.summary.FileWriter(self.model_dir)
-        self.sv = tf.train.MonitoredTrainingSession(
-            summary_dir=self.model_dir,
-            config = self.sess_config
-            )
+
 
     def use_pretrained(self):
         """
@@ -231,10 +160,13 @@ class HMRTrainer(object):
         return init_mean
 
     def build_model(self):
+        self.is_training = tf.placeholder(tf.bool)
+
         img_enc_fn, threed_enc_fn = get_encoder_fn_separate(self.model_type)
         # Extract image features.
         self.img_feat, self.E_var = img_enc_fn(
-            self.image, weight_decay=self.e_wd, reuse=False)
+            self.image, weight_decay=self.e_wd, reuse=False,
+            is_training=self.is_training)
 
         loss_mr = []
         loss_kps = []
@@ -268,11 +200,12 @@ class HMRTrainer(object):
                 delta_theta, threeD_var = threed_enc_fn(
                     state,
                     num_output=self.total_params,
-                    reuse=False)
+                    reuse=False, is_training=self.is_training)
                 self.E_var.extend(threeD_var)
             else:
                 delta_theta, _ = threed_enc_fn(
-                    state, num_output=self.total_params, reuse=True)
+                    state, num_output=self.total_params, reuse=True,
+                    is_training=self.is_training)
 
             # Compute new theta
             theta_here = theta_prev + delta_theta
@@ -308,25 +241,21 @@ class HMRTrainer(object):
 
             pred_kp = batch_orth_proj_idrot(
                 Js, cams, name='proj2d_stage%d' % i)
-            if(not self.use_mesh_repro_loss):
-                loss_kps.append(self.e_loss_weight * self.keypoint_loss(
-                        self.kp_gt, pred_kp))
+
+            if(self.use_kp_loss):
+                loss_kps.append(self.keypoint_loss(self.kp_gt, pred_kp))
+
             if(self.use_mesh_repro_loss):
-                print("seg_gt: ", self.seg_gt)
                 silhouette_gt = tf.where(tf.greater(self.seg_gt, 0.))[:, :3]
-                #silhouette_gt = get_sil(self.seg_gt)
                 silhouette_pred = reproject_vertices(verts, cams,
                                                      self.image.shape.as_list()[1:3], name='mesh_reproject_stage%d' % i)
                 self.silhouette_pred = silhouette_pred
                 self.silhouette_gt = silhouette_gt
-                print("silhouette_gt: ", silhouette_gt)
-                print("silhouette_pred: ", silhouette_pred)
+
                 repro_loss, ba_dist, ab_dist, self.sil_pts_gt, self.sil_pts_pred = self.mesh_repro_loss(
                     silhouette_gt, silhouette_pred, self.batch_size, name='mesh_repro_loss' % i)
                 repro_loss_scaled = repro_loss * self.mr_loss_weight
-                kp_loss = self.keypoint_loss(self.kp_gt, pred_kp)
 
-                loss_kps.append(kp_loss)
                 loss_mr.append(repro_loss_scaled)
 
             pred_Rs = tf.reshape(pred_Rs, [-1, 24, 9])
@@ -357,13 +286,20 @@ class HMRTrainer(object):
         # Gather losses.
         with tf.name_scope("gather_e_loss"):
             # Just the last loss.
-            self.e_loss_kp = loss_kps[-1]
-            self.e_loss_mr = loss_mr[-1]
+            if self.use_kp_loss:
+                self.e_loss_kp = loss_kps[-1]
+            else:
+                self.e_loss_kp = 0.
+
+            if self.use_mesh_repro_loss:
+                self.e_loss_mr = loss_mr[-1]
+            else:
+                self.e_loss_mr = 0.
 
             if self.encoder_only:
                 self.e_loss = self.e_loss_kp + self.e_loss_mr
             else:
-                self.e_loss = self.d_loss_weight * self.e_loss_disc + self.e_loss_kp
+                self.e_loss = self.d_loss_weight * self.e_loss_disc + self.e_loss_kp + self.e_loss_mr
 
             if self.use_3d_label:
                 self.e_loss_3d = loss_3d_params[-1]
@@ -394,7 +330,6 @@ class HMRTrainer(object):
             with tf.Session() as sess:
                 print("kp_gt: ", self.kp_gt.eval(session=sess))
                 print("show_these: ", self.show_these.eval(session=sess))
-                
         '''
         # Don't forget to update batchnorm's moving means.
         print('collecting batch norm moving means!!')
@@ -440,10 +375,11 @@ class HMRTrainer(object):
                                   self.e_loss_disc / self.d_loss_weight),
             ])
         # loss at each stage.
-        for i in np.arange(self.num_stage):
-            name_here = "loss/e_losses_noscale/kp_loss_stage%d" % i
-            always_report.append(
-                tf.summary.scalar(name_here, loss_kps[i] / self.e_loss_weight))
+        if self.use_kp_loss:
+            for i in np.arange(self.num_stage):
+                name_here = "loss/e_losses_noscale/kp_loss_stage%d" % i
+                always_report.append(
+                    tf.summary.scalar(name_here, loss_kps[i] / self.e_loss_weight))
         if self.use_3d_label:
             always_report.append(
                 tf.summary.scalar("loss/e_loss_3d_params_noscale",
@@ -587,7 +523,7 @@ class HMRTrainer(object):
         return combined
 
 
-    def draw_results(self, result):
+    def draw_results(self, result, summary_writer):
         import io
         import matplotlib.pyplot as plt
         import cv2
@@ -643,14 +579,17 @@ class HMRTrainer(object):
                 tf.Summary.Value(tag="vis_images/%d" % img_id, image=vis_sum))
 
         img_summary = tf.Summary(value=img_summaries)
-        self.summary_writer.add_summary(
+        summary_writer.add_summary(
             img_summary, global_step=result['step'])
 
-        ###
-        #self.summary_writer.close()
-        ###
-
     def train(self):
+        #self.sv = tf.train.MonitoredTrainingSession(
+        #    summary_dir=self.model_dir,
+        #    config = self.sess_config
+        #    )
+
+        sess = tf.Session(config = self.sess_config)
+
         print('started training')
         # For rendering!
         self.renderer = vis_util.SMPLRenderer(
@@ -659,29 +598,122 @@ class HMRTrainer(object):
 
         step = 0
 
+        self.train_iterator = self.train_dataset.make_one_shot_iterator()
+        self.test_iterator = self.test_dataset.make_one_shot_iterator()
 
+        epoch = 0
+        time_diff = []
         print('...')
-        with self.sv as sess:
-            while not self.sv.should_stop():
+        with sess.as_default():
+
+            # Add an op to initialize the variables.
+            init_op = tf.global_variables_initializer()
+            sess.run(init_op)
+
+            self.test_iterator_handle = sess.run(self.test_iterator.string_handle())
+            self.train_iterator_handle = sess.run(self.train_iterator.string_handle())
+
+            self.handle = tf.placeholder(tf.string, shape=[])
+            iterator = tf.data.Iterator.from_string_handle(
+                self.handle, self.train_iterator.output_types,
+                output_shapes=self.train_iterator.output_shapes)
+
+            # Formats
+            # image: B x H x W x 3
+            # seg_gt: B x H x W x 1
+            # kp_gt: B x 19 x 3
+
+            self.image, self.seg_gt, self.kp_gt = iterator.get_next()
+
+            self.a = tf.reshape(self.kp_gt, (-1,3))
+            # First make sure data_format is right
+            if self.data_format == 'NCHW':
+                # B x H x W x 3 --> B x 3 x H x W
+                self.image = tf.transpose(self.image, [0, 3, 1, 2])
+                self.seg_gt = tf.transpose(self.seg_gt, [0, 3, 1, 2])
+
+    #        if self.use_3d_label:
+    #            self.poseshape_loader = data_loader['label3d']
+    #            # image_loader[3] is N x 2, first column is 3D_joints gt existence,
+    #            # second column is 3D_smpl gt existence
+    #            self.has_gt3d_joints = data_loader['has3d'][:, 0]
+    #            self.has_gt3d_smpl = data_loader['has3d'][:, 1]
+
+            #self.pose_loader = mocap_loader[0]
+            #self.shape_loader = mocap_loader[1]
+
+            # For visualization:
+            num2show = np.minimum(6, self.batch_size)
+            # Take half from front & back
+            print("batch size: ", self.batch_size)
+            print("array: ", np.arange(num2show / 2), "...", self.batch_size - np.arange(3) - 1)
+            print("np_stack: ", np.hstack(
+                [np.arange(num2show / 2), self.batch_size - np.arange(3) - 1]))
+            #TODO: find out at which batch size 'show_these_np' contains negative indices
+            #       set it to [0] if it contains negative indices
+            if(self.batch_size > 1):
+                show_these_np = np.hstack(
+                    [np.arange(num2show / 2), self.batch_size - np.arange(3) - 1])
+                print("SHOW THESE NP: ", show_these_np)
+                self.show_these = tf.constant(show_these_np, tf.int32)
+            else:
+                show_these_np = np.array([0])
+                print("SHOW THESE NP: ", show_these_np)
+                self.show_these = tf.constant(show_these_np, tf.int32)
+
+            self.optimizer = tf.train.AdamOptimizer
+
+            # Instantiate SMPL
+            self.smpl = SMPL(self.smpl_model_path)
+            self.E_var = []
+            self.build_model()
+
+            # Logging
+            init_fn = None
+            if self.use_pretrained():
+                # Make custom init_fn
+                print("Fine-tuning from %s" % self.pretrained_model_path)
+                if 'resnet_v2_50' in self.pretrained_model_path:
+                    resnet_vars = [
+                        var for var in self.E_var if 'resnet_v2_50' in var.name
+                    ]
+                    self.pre_train_saver = tf.train.Saver(resnet_vars)
+                elif 'pose-tensorflow' in self.pretrained_model_path:
+                    resnet_vars = [
+                        var for var in self.E_var if 'resnet_v1_101' in var.name
+                    ]
+                    self.pre_train_saver = tf.train.Saver(resnet_vars)
+                else:
+                    self.pre_train_saver = tf.train.Saver()
+
+                def load_pretrain(sess):
+                    self.pre_train_saver.restore(sess, self.pretrained_model_path)
+
+                init_fn = load_pretrain
+
+            self.summary_writer_train = tf.summary.FileWriter(self.model_dir+"_train")
+            self.summary_writer_test = tf.summary.FileWriter(self.model_dir+"_val")
+
+
+            while not epoch is self.max_epoch: #self.sv.should_stop():
+
                 fetch_dict = {
                     "summary": self.summary_op_always,
                     "step": self.global_step,
                     "e_loss": self.e_loss,
                     # The meat
                     "e_opt": self.e_opt,
-                    "loss_kp": self.e_loss_kp
-
-                    #####
-                    #"img": self.image,
-                    #"seg_gt": self.seg_gt,
-                    #"image_feat": self.img_feat,
-                    #"sil_pred": self.silhouette_pred,
-                    #"sil_gt": self.silhouette_gt,
-                    #"sil_pts_gt": self.sil_pts_gt,
-                    #"sil_pts_pred": self.sil_pts_pred
-                    #####
+                   }
+                feed_dict = {
+#                    self.image: curr_img,
+#                    self.seg_gt: curr_seg_gt,
+#                    self.kp_gt: curr_kp_gt,
+                    self.is_training: True,
+                    self.handle: self.train_iterator_handle,
                 }
 
+                if self.use_kp_loss:
+                    fetch_dict.update({"loss_kp": self.e_loss_kp})
 
                 if(not self.use_mesh_repro_loss):
                     if step % self.log_img_step == 0:
@@ -705,43 +737,15 @@ class HMRTrainer(object):
                             "cam": self.all_pred_cams,
                         })
 
-
                 t0 = time()
-                result = sess.run(fetch_dict)
+                result = sess.run(fetch_dict, feed_dict=feed_dict)
                 t1 = time()
 
-                '''
-                #####
-                print("sil_pred.shape: ", result["sil_pred"].shape)
-                print("sil_gt.shape: ", result["sil_gt"].shape)
-                print("img.shape", result["img"].shape)
-                print("seg_gt.shape", result["seg_gt"].shape)
-                # print("verts.shape", res["verts"].shape)
-                print("image_feat.shape", result["image_feat"].shape)
-                sil_pts_gt = result["sil_pts_gt"]
-                sil_pts_pred = result["sil_pts_pred"]
-                print("sil_pts_gt.shape", sil_pts_gt.shape)
-                print("sil_pts_pred.shape", sil_pts_pred.shape)
-
-
-                import matplotlib.pyplot as plt
-                fig, axs = plt.subplots(2)
-                axs[0].imshow(result["img"][0])
-                seg_np = np.squeeze(result["seg_gt"][0], axis=2)
-                axs[1].imshow(seg_np)
-                axs[1].plot(sil_pts_gt[:,0], sil_pts_gt[:,1], 'bo')
-                #axs[1].plot(sil_pts_pred[:,0], sil_pts_pred[:,1], 'ro')
-
-                plt.show()
-                #####
-                '''
-
-                self.summary_writer.add_summary(
-                    result['summary'], global_step=result['step'])
+                self.summary_writer_train.add_summary(result['summary'], global_step=result['step'])
 
                 e_loss = result['e_loss']
                 step = result['step']
-
+                time_diff.append(t1-t0)
                 epoch = float(step) / self.num_itr_per_epoch
                 if self.encoder_only:
                     print("itr %d/(epoch %.1f): time %g, Enc_loss: %.4f" %
@@ -754,16 +758,34 @@ class HMRTrainer(object):
 
                 if step % self.log_img_step == 0:
                     if not self.encoder_only:
-                        self.summary_writer.add_summary(
+                        self.summary_writer_train.add_summary(
                             result['summary_occasional'],
                             global_step=result['step'])
                     print("DRAWING")
-                    self.draw_results(result)
+                    self.draw_results(result, self.summary_writer_train)
 
-                self.summary_writer.flush()
-                #if epoch > self.max_epoch:
-                #    self.sv.request_stop()
+                self.summary_writer_train.flush()
+
+
+                if step % self.validation_step_size == 0:
+                    fetch_dict.update({
+                        "input_img": self.show_imgs,
+                        "gt_kp": self.show_kps,
+                        "seg_gt": self.show_segs,
+                        "e_verts": self.all_verts,
+                        "joints": self.all_pred_kps,
+                        #"seg": self.all_pred_silhouettes,
+                        "cam": self.all_pred_cams,
+                    })
+                    feed_dict = feed_dict.update({self.is_training: False,
+                                    self.handle: self.test_iterator_handle,
+                                })
+                    result = sess.run(fetch_dict, feed_dict=feed_dict)
+                    self.summary_writer_test.add_summary(result['summary'],
+                                                         global_step=result['step'])
+                    self.draw_results(result, self.summary_writer_test)
 
                 step += 1
 
         print('Finish training on %s' % self.model_dir)
+        print('Average time per iteration was', np.mean(time_diff)) 

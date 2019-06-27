@@ -64,12 +64,12 @@ class DataLoader(object):
 
         self.image_normalizing_fn = data_utils.rescale_image
 
-    def load(self):
-        image_loader = self.get_loader()
+    def load(self, train_test_split=1):
+        train, test = self.get_loader(train_test_split)
 
-        return image_loader
+        return train, test
 
-    def get_loader(self):
+    def get_loader(self, train_test_split=1):
         """
         Outputs:
           image_batch: batched images as per data_format
@@ -83,10 +83,15 @@ class DataLoader(object):
 
         dataset = self.read_data(files)
 
-        dataset = dataset.shuffle(buffer_size=10000)
-        dataset = dataset.batch(self.batch_size)
+        train_split = int(len(files)/train_test_split)
 
-        return dataset
+        dataset = dataset.shuffle(buffer_size=10000)
+        train_dataset = dataset.take(train_split)
+        test_dataset = dataset.skip(train_split)
+
+        train_dataset = train_dataset.batch(self.batch_size)
+        test_dataset = test_dataset.batch(self.batch_size)
+        return train_dataset, test_dataset
 
     def get_smpl_loader(self):
         """
