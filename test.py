@@ -33,6 +33,7 @@ def main(config):
 
     num_epochs = config.epoch
     train_dataset = train_dataset.repeat(num_epochs)
+    test_dataset = test_dataset.repeat(num_epochs)
 
     trainer = HMRTrainer(config, train_dataset, test_dataset)
     save_config(config)

@@ -96,6 +96,7 @@ class HMRTrainer(object):
         self.global_step = tf.Variable(0, name='global_step', trainable=False)
         self.log_img_step = config.log_img_step
 
+        self.validation_step_size = config.validation_step_size
         # Model spec
         self.model_type = config.model_type
         self.keypoint_loss = keypoint_l1_loss
@@ -606,10 +607,6 @@ class HMRTrainer(object):
         print('...')
         with sess.as_default():
 
-            # Add an op to initialize the variables.
-            init_op = tf.global_variables_initializer()
-            sess.run(init_op)
-
             self.test_iterator_handle = sess.run(self.test_iterator.string_handle())
             self.train_iterator_handle = sess.run(self.train_iterator.string_handle())
 
@@ -694,6 +691,10 @@ class HMRTrainer(object):
             self.summary_writer_train = tf.summary.FileWriter(self.model_dir+"_train")
             self.summary_writer_test = tf.summary.FileWriter(self.model_dir+"_val")
 
+            # Add an op to initialize the variables.
+            init_op = tf.global_variables_initializer()
+            sess.run(init_op)
+
 
             while not epoch is self.max_epoch: #self.sv.should_stop():
 
@@ -766,7 +767,6 @@ class HMRTrainer(object):
 
                 self.summary_writer_train.flush()
 
-
                 if step % self.validation_step_size == 0:
                     fetch_dict.update({
                         "input_img": self.show_imgs,
@@ -777,13 +777,13 @@ class HMRTrainer(object):
                         #"seg": self.all_pred_silhouettes,
                         "cam": self.all_pred_cams,
                     })
-                    feed_dict = feed_dict.update({self.is_training: False,
+                    feed_dict = {self.is_training: False,
                                     self.handle: self.test_iterator_handle,
-                                })
+                                }
                     result = sess.run(fetch_dict, feed_dict=feed_dict)
                     self.summary_writer_test.add_summary(result['summary'],
                                                          global_step=result['step'])
-                    self.draw_results(result, self.summary_writer_test)
+                    #self.draw_results(result, self.summary_writer_test)
 
                 step += 1
 
