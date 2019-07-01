@@ -21,7 +21,7 @@ def num_examples(datasets):
     _NUM_TRAIN = {
         'lsp_few_new': 10,
         'lsp_few_new_1': 10,
-        'lsp': 1000,
+        'lsp': 2000,
         'lsp_ext': 10000,
         'lsp_single': 1,
         'lsp_single_new': 1,
@@ -77,14 +77,9 @@ class DataLoader(object):
         """
         files = data_utils.get_all_files(self.dataset_dir, self.datasets)
 
-        do_shuffle = True
-
         print(files)
 
         dataset = self.read_data(files)
-
-        dataset = dataset.shuffle(buffer_size=10000)
-        dataset = dataset.batch(self.batch_size)
 
         return dataset
 

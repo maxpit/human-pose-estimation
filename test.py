@@ -31,10 +31,6 @@ def main(config):
         dataset = data_loader.load()
         #smpl_loader = data_loader.get_smpl_loader()
 
-   
-    num_epochs = config.epoch
-    
-    dataset = dataset.repeat(num_epochs)
 #    iterator = dataset.make_one_shot_iterator()
 
 #    next_element = iterator.get_next()
