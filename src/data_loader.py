@@ -164,14 +164,14 @@ class DataLoader(object):
             keypoints = label[:2, :]
 
             # Randomly shift center.
-#            print('Using translation jitter: %d' % self.trans_max)
-#            center = data_utils.jitter_center(center, self.trans_max)
-#            print("shifted center")
+            print('Using translation jitter: %d' % self.trans_max)
+            center = data_utils.jitter_center(center, self.trans_max)
+            print("shifted center")
 
             # randomly scale image.
-#            image, seg_gt, keypoints, center = data_utils.jitter_scale(
-#                image, seg_gt, image_size, keypoints, center, self.scale_range)
-#            print("scaled image")
+            image, seg_gt, keypoints, center = data_utils.jitter_scale(
+                image, seg_gt, image_size, keypoints, center, self.scale_range)
+            print("scaled image")
 
             # Pad image with safe margin.
             # Extra 50 for safety.
@@ -202,11 +202,11 @@ class DataLoader(object):
 #            print("crop", crop)
 #            print("crop_gt", crop_gt)
 #            print("crop_kp", crop_kp)
-#            if pose is not None and gt3d is not None:
-#                crop, crop_gt, crop_kp, new_pose, new_gt3d = data_utils.random_flip(
-#                    crop, crop_gt, crop_kp, pose, gt3d)
-#            else:
-#                crop, crop_gt, crop_kp = data_utils.random_flip(crop, crop_gt, crop_kp)
+            if pose is not None and gt3d is not None:
+                crop, crop_gt, crop_kp, new_pose, new_gt3d = data_utils.random_flip(
+                    crop, crop_gt, crop_kp, pose, gt3d)
+            else:
+                crop, crop_gt, crop_kp = data_utils.random_flip(crop, crop_gt, crop_kp)
 
             # Normalize kp output to [-1, 1]
             final_vis = tf.cast(crop_kp[2, :] > 0, tf.float32)

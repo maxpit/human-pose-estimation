@@ -257,8 +257,11 @@ class HMRTrainer(object):
     def build_model(self):
         img_enc_fn, threed_enc_fn = get_encoder_fn_separate(self.model_type)
         # Extract image features.
+
+        self.isTraining = tf.placeholder(tf.bool)
+
         self.img_feat, self.E_var = img_enc_fn(
-            self.image, weight_decay=self.e_wd, reuse=False)
+            self.image, weight_decay=self.e_wd, is_training=self.isTraining, reuse=False)
 
         loss_mr = []
         loss_kps = []
@@ -292,11 +295,13 @@ class HMRTrainer(object):
                 delta_theta, threeD_var = threed_enc_fn(
                     state,
                     num_output=self.total_params,
+                    is_training = self.isTraining,
                     reuse=False)
                 self.E_var.extend(threeD_var)
             else:
                 delta_theta, _ = threed_enc_fn(
-                    state, num_output=self.total_params, reuse=True)
+                    state, num_output=self.total_params,
+                    is_training=self.isTraining, reuse=True)
 
             # Compute new theta
             theta_here = theta_prev + delta_theta
@@ -382,7 +387,10 @@ class HMRTrainer(object):
         with tf.name_scope("gather_e_loss"):
             # Just the last loss.
             self.e_loss_kp = loss_kps[-1]
-            self.e_loss_mr = loss_mr[-1]
+            if self.use_mesh_repro_loss:
+                self.e_loss_mr = loss_mr[-1] 
+            else:
+                self.e_loss_mr = 0
 
             if self.encoder_only:
                 self.e_loss = self.e_loss_kp + self.e_loss_mr
@@ -684,7 +692,8 @@ class HMRTrainer(object):
         with self.sv as sess:
 
             if self.use_val:
-                sess.run(self.iterator_init_op_train)
+                sess.run(self.iterator_init_op_train,
+                         feed_dict={self.isTraining: True})
 
             while not self.sv.should_stop():
                 fetch_dict = {
@@ -721,7 +730,7 @@ class HMRTrainer(object):
 
 
                 t0 = time()
-                result = sess.run(fetch_dict)
+                result = sess.run(fetch_dict, feed_dict={self.isTraining: True})
                 t1 = time()
 
                 self.summary_writer.add_summary(
@@ -750,35 +759,42 @@ class HMRTrainer(object):
                 self.summary_writer.flush()
 
                 if self.use_val:
-                    if step % self.val_step == 0:
+                    if step % self.num_itr_per_epoch == 0:
                         val_step += 1
-
-                        fetch_dict = {
-                            "summary": self.summary_op_always,
-                            "e_loss": self.e_loss,
-                            "loss_kp": self.e_loss_kp
-                            }
-
                         print("validation step")
-                        sess.run(self.iterator_init_op_val)
 
-                        t0 = time()
-                        result = sess.run(fetch_dict)
-                        t1 = time()
-                        val_loss = result['e_loss']
-                        print("itr %d/(epoch %.1f): time %g, val_loss: %.4f" %
-                              (step, epoch, t1 - t0, val_loss))
+                        sess.run(self.iterator_init_op_val,
+                                 feed_dict={self.isTraining: False})
+                        e_loss_val = 0
+                        for i in range(int(self.num_itr_per_epoch)):
 
-                        self.summary_writer_val.add_summary(result["summary"],
-                                                            global_step=step)
+                            fetch_dict = {
+                                "e_loss": self.e_loss,
+                                }
 
+                            t0 = time()
+                            result = sess.run(fetch_dict,
+                                              feed_dict={self.isTraining: False})
+                            t1 = time()
+                            val_loss = result['e_loss']
+                            e_loss_val = e_loss_val + val_loss
 #                        if val_step % self.log_val_img_step == 0:
 #                            self.draw_results(result, self.summary_writer_val)
+                        print("validation e_loss mean:", e_loss_val/self.num_itr_per_epoch)
+
+                        sum_result = sess.run(self.summary_op_always,
+                                  feed_dict = {self.e_loss:
+                                               e_loss_val/self.num_itr_per_epoch,
+                                              self.isTraining: False})
+                        self.summary_writer_val.add_summary(sum_result,
+                                                                global_step=step)
+
                         self.summary_writer_val.flush()
-                        sess.run(self.iterator_init_op_train)
+                        sess.run(self.iterator_init_op_train,
+                                 feed_dict={self.isTraining: False})
 
                 if epoch > self.max_epoch:
-                    self.sv.request_stop()
+                    break
 
                 step += 1
 
