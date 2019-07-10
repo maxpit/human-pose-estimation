@@ -72,9 +72,9 @@ class DataLoader(object):
     def load(self):
         image_loader = self.get_loader()
 
-        return image_loader
+        return train, test
 
-    def get_loader(self):
+    def get_loader(self, train_test_split=1):
         """
         Outputs:
           image_batch: batched images as per data_format

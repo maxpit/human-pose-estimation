@@ -25,6 +25,9 @@ from time import time
 import tensorflow as tf
 import numpy as np
 
+from tensorflow.python.ops import resources
+from tensorflow.python.ops import variables
+
 from os.path import join, dirname
 import deepdish as dd
 
@@ -45,6 +48,9 @@ class HMRTrainer(object):
         """
         # Config + path
         self.config = config
+
+        self.train_dataset = train_dataset
+        self.test_dataset = test_dataset
 
         self.model_dir = config.model_dir
         print('model dir: %s', self.model_dir)
@@ -77,6 +83,7 @@ class HMRTrainer(object):
         self.num_theta = 72  # 24 * 3
         self.total_params = self.num_theta + self.num_cam + 10
         self.use_mesh_repro_loss = config.use_mesh_repro_loss
+        self.use_kp_loss= config.use_kp_loss
 
         # Data
         num_images = num_examples(config.datasets)
@@ -153,25 +160,7 @@ class HMRTrainer(object):
         self.global_step = tf.Variable(0, name='global_step', trainable=False)
         self.log_img_step = config.log_img_step
 
-        # For visualization:
-        num2show = np.minimum(6, self.batch_size)
-        # Take half from front & back
-        print("batch size: ", self.batch_size)
-        print("array: ", np.arange(num2show / 2), "...", self.batch_size - np.arange(3) - 1)
-        print("np_stack: ", np.hstack(
-            [np.arange(num2show / 2), self.batch_size - np.arange(3) - 1]))
-        #TODO: find out at which batch size 'show_these_np' contains negative indices
-        #       set it to [0] if it contains negative indices
-        if(self.batch_size > 1):
-            show_these_np = np.hstack(
-                [np.arange(num2show / 2), self.batch_size - np.arange(3) - 1])
-            print("SHOW THESE NP: ", show_these_np)
-            self.show_these = tf.constant(show_these_np, tf.int32)
-        else:
-            show_these_np = np.array([0])
-            print("SHOW THESE NP: ", show_these_np)
-            self.show_these = tf.constant(show_these_np, tf.int32)
-
+        self.validation_step_size = config.validation_step_size
         # Model spec
         self.model_type = config.model_type
         self.keypoint_loss = keypoint_l1_loss
@@ -272,6 +261,8 @@ class HMRTrainer(object):
         return init_mean
 
     def build_model(self):
+        self.is_training = tf.placeholder(tf.bool)
+
         img_enc_fn, threed_enc_fn = get_encoder_fn_separate(self.model_type)
         # Extract image features.
         self.isTraining = tf.placeholder(tf.bool)
@@ -357,21 +348,16 @@ class HMRTrainer(object):
                 loss_kps.append(self.generator_loss_weight * self.keypoint_loss(
                         self.kp_gt, pred_kp))
             if(self.use_mesh_repro_loss):
-                print("seg_gt: ", self.seg_gt)
                 silhouette_gt = tf.where(tf.greater(self.seg_gt, 0.))[:, :3]
-                #silhouette_gt = get_sil(self.seg_gt)
                 silhouette_pred = reproject_vertices(verts, cams,
                                                      self.image.shape.as_list()[1:3], name='mesh_reproject_stage%d' % i)
                 self.silhouette_pred = silhouette_pred
                 self.silhouette_gt = silhouette_gt
-                print("silhouette_gt: ", silhouette_gt)
-                print("silhouette_pred: ", silhouette_pred)
+
                 repro_loss, ba_dist, ab_dist, self.sil_pts_gt, self.sil_pts_pred = self.mesh_repro_loss(
                     silhouette_gt, silhouette_pred, self.batch_size, name='mesh_repro_loss' % i)
                 repro_loss_scaled = repro_loss * self.mr_loss_weight
-                kp_loss = self.keypoint_loss(self.kp_gt, pred_kp)
 
-                loss_kps.append(kp_loss)
                 loss_mr.append(repro_loss_scaled)
 
             pred_Rs = tf.reshape(pred_Rs, [-1, 24, 9])
@@ -660,6 +646,13 @@ class HMRTrainer(object):
             img_summary, global_step=result['step'])
 
     def train(self):
+        #self.sv = tf.train.MonitoredTrainingSession(
+        #    summary_dir=self.model_dir,
+        #    config = self.sess_config
+        #    )
+
+        sess = tf.Session(config = self.sess_config)
+
         print('started training')
         # For rendering!
         self.renderer = vis_util.SMPLRenderer(
@@ -669,6 +662,8 @@ class HMRTrainer(object):
         step = 0
         val_step = 0
 
+        epoch = 0
+        time_diff = []
         print('...')
         with self.sv as sess:
             feed_dict={self.isTraining: False, self.isTrainingCritic: False}
@@ -690,6 +685,8 @@ class HMRTrainer(object):
                     "loss_kp": self.generator_loss_kp
                     }
 
+                if self.use_kp_loss:
+                    fetch_dict.update({"loss_kp": self.e_loss_kp})
 
                 if(not self.use_mesh_repro_loss):
                     if step % self.log_img_step == 0:
@@ -723,7 +720,7 @@ class HMRTrainer(object):
 
                 generator_loss = result['generator_loss']
                 step = result['step']
-
+                time_diff.append(t1-t0)
                 epoch = float(step) / self.num_itr_per_epoch
                 if self.encoder_only:
                     print("itr %d/(epoch %.1f): time %g, Enc_loss: %.4f" %
@@ -815,3 +812,4 @@ class HMRTrainer(object):
                 step += 1
 
         print('Finish training on %s' % self.model_dir)
+        print('Average time per iteration was', np.mean(time_diff)) 
