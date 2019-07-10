@@ -11,7 +11,7 @@ from __future__ import print_function
 from .data_loader import num_examples
 
 from .ops import keypoint_l1_loss, compute_3d_loss, align_by_pelvis, mesh_reprojection_loss
-from .models import Discriminator_separable_rotations, get_encoder_fn_separate
+from .models import Critic_network, get_encoder_fn_separate, precompute_C_matrix
 
 from .tf_smpl.batch_lbs import batch_rodrigues
 from .tf_smpl.batch_smpl import SMPL
@@ -189,6 +189,9 @@ class HMRTrainer(object):
         # Instantiate SMPL
         self.smpl = SMPL(self.smpl_model_path)
         self.E_var = []
+
+        self.C = precompute_C_matrix()
+
         self.build_model()
 
         # Logging
@@ -267,14 +270,11 @@ class HMRTrainer(object):
         return init_mean
 
     def build_model(self):
-        self.is_training = tf.placeholder(tf.bool)
-
         img_enc_fn, threed_enc_fn = get_encoder_fn_separate(self.model_type)
         # Extract image features.
-        self.isTraining = tf.placeholder(tf.bool)
 
         self.img_feat, self.E_var = img_enc_fn(
-            self.image, weight_decay=self.e_wd, is_training=self.isTraining, reuse=False)
+            self.image, weight_decay=self.e_wd, reuse=False)
 
         loss_mr = []
         loss_kps = []
@@ -308,13 +308,11 @@ class HMRTrainer(object):
                 delta_theta, threeD_var = threed_enc_fn(
                     state,
                     num_output=self.total_params,
-                    is_training = self.isTraining,
                     reuse=False)
                 self.E_var.extend(threeD_var)
             else:
                 delta_theta, _ = threed_enc_fn(
-                    state, num_output=self.total_params,
-                    is_training=self.isTraining, reuse=True)
+                    state, num_output=self.total_params, reuse=True)
 
             # Compute new theta
             theta_here = theta_prev + delta_theta
@@ -492,11 +490,13 @@ class HMRTrainer(object):
         self.summary_op_always = tf.summary.merge(always_report)
 
     def setup_critic(self, fake_joints, fake_shapes):
-        self.isTrainingCritic = tf.placeholder(tf.bool)
-
         #TODO check if correct
         all_fake_joints = tf.concat(fake_joints, 0)
-        combined_joints = tf.concat([self.joints, all_fake_joints], 0,
+
+        print('real_joints', self.joints)
+        print('fake_joints', all_fake_joints)
+
+        combined_joints = tf.concat([tf.squeeze(self.joints), all_fake_joints], 0,
                                name="combined_joints")
 
         all_fake_shapes = tf.concat(fake_shapes, 0)
@@ -508,20 +508,14 @@ class HMRTrainer(object):
             'joints': combined_joints
         }
 
-        self.d_out, self.D_var = Critic_network(**disc_input,
-                                                is_training=self.isTrainingCritic)
+        self.d_out, self.D_var = Critic_network(**disc_input, C_matrix=self.C,
+                                                batch_size=self.batch_size)
         self.d_out_real, self.d_out_fake = tf.split(self.d_out, 2)
 
         # Compute losses:
         with tf.name_scope("comp_critic_loss"):
-            self.critic_loss_fake = losses.compute_weighted_loss(
-                        d_out_fake,
-                        generated_weights,
-                        "comp_critic_loss")
-            self.critic_loss_real = losses.compute_weighted_loss(
-                        d_out_real,
-                    real_weights,
-                    "comp_critic_loss")
+            self.critic_loss_fake = losses.compute_weighted_loss(self.d_out_fake)
+            self.critic_loss_real = losses.compute_weighted_loss(self.d_out_real)
 
     def get_3d_loss(self, Rs, shape, joints):
         """
@@ -672,9 +666,11 @@ class HMRTrainer(object):
         time_diff = []
         print('...')
         with self.sv as sess:
-            feed_dict={self.isTraining: False, self.isTrainingCritic: False}
+            if not self.encoder_only:
+                sess.run(self.critic_iterator.initializer)
+
             if self.use_val:
-                sess.run(self.iterator_init_op_train, feed_dict=feed_dict)
+                sess.run(self.iterator_init_op_train)
 
             while not self.sv.should_stop():
 
@@ -715,10 +711,8 @@ class HMRTrainer(object):
                             "cam": self.all_pred_cams,
                         })
 
-
-                feed_dict.update({self.isTraining: True})
                 t0 = time()
-                result = sess.run(fetch_dict, feed_dict=feed_dict)
+                result = sess.run(fetch_dict)
                 t1 = time()
 
                 self.summery_writer_train.add_summary(
@@ -755,18 +749,15 @@ class HMRTrainer(object):
                         "critic_loss": self.critic_loss
                         }
 
-                    feed_dict.update({self.isTrainingCritic: True,
-                                      self.isTraining: False})
                     t0 = time()
-                    critic_result = sess.run(fetch_dict, feed_dict=feed_dict)
+                    critic_result = sess.run(fetch_dict)
                     t1 = time()
 
                     print("Training critic - time: %g, loss: %.4f" % (t1 - t0,
                                                                   critic_result["critic_loss"]))
-                    critic_feed_dict = feed_dict.update({self.summary_loss:
-                                                         critic_result['critic_loss']})
+                    critic_feed_dict = {self.summary_loss: critic_result['critic_loss']}
                     critic_summ = sess.run(self.summary_op_always,
-                                           feed_dict=feed_dict)
+                                           feed_dict=critic_feed_dict)
 
                     self.summary_writer_critic.add_summary(critic_summ,
                                                            result['step'])
@@ -780,10 +771,7 @@ class HMRTrainer(object):
                         val_step += 1
                         print("validation step")
 
-                        feed_dict.update({self.isTraining: False,
-                                          self.isTrainingCritic: False})
-                        sess.run(self.iterator_init_op_val,
-                                 feed_dict=feed_dict)
+                        sess.run(self.iterator_init_op_val)
                         generator_loss_val = 0
                         for i in range(int(self.num_itr_per_epoch)):
 
@@ -792,8 +780,7 @@ class HMRTrainer(object):
                                 }
 
                             t0 = time()
-                            result = sess.run(fetch_dict,
-                                              feed_dict=feed_dict)
+                            result = sess.run(fetch_dict)
                             t1 = time()
                             val_loss = result['generator_loss']
                             generator_loss_val = generator_loss_val + val_loss
@@ -803,14 +790,12 @@ class HMRTrainer(object):
 
                         sum_result = sess.run(self.summary_op_always,
                                   feed_dict = {self.generator_loss:
-                                               generator_loss_val/self.num_itr_per_epoch,
-                                              self.isTraining: False})
+                                               generator_loss_val/self.num_itr_per_epoch})
                         self.summary_writer_val.add_summary(sum_result,
                                                                 global_step=step)
 
                         self.summary_writer_val.flush()
-                        sess.run(self.iterator_init_op_train,
-                                 feed_dict=feed_dict)
+                        sess.run(self.iterator_init_op_train)
 
                 if epoch > self.max_epoch:
                     break

@@ -162,7 +162,7 @@ def precompute_C_matrix():
     C_np = np.zeros([num_joints, num_bones])
     C_np[indices_ones, np.arange(num_bones)] = 1
     C_np[indices_minus_ones, np.arange(num_bones)] = -1
-    C = tf.constant(C_np)
+    C = tf.constant(C_np, dtype=tf.float32)
 
     #with tf.Session() as sess:
     #    c = sess.run(C)
@@ -209,11 +209,17 @@ def Critic_network(
            # with slim.arg_scope([slim.conv2d, slim.fully_connected],
            #                     weights_regularizer=slim.l2_regularizer(weight_decay)):
            #     with slim.arg_scope([slim.conv2d]):
-            kcs_naive = tf.Variable(tf.zeros(shape=(13, 13)), tf.float32)
+            kcs_naive = tf.Variable(tf.zeros(shape=(1, 13, 13)), trainable=False,
+                                    dtype=tf.float32)
+            print('C_matrix', C_matrix)
+            print('joints', joints)
+
+            joints = joints[:,:14,:]
+
             for i in range(batch_size):
                 kcs_single = tf.matmul(tf.matmul(tf.transpose(C_matrix), tf.matmul(joints[i], tf.transpose(joints[i]))), C_matrix)
                 #kcs = tf.assign(kcs[i], tf.cast(kcs_single, tf.float32))
-                kcs_naive = tf.stack([kcs_naive, tf.cast(kcs_single, tf.float32)])
+                kcs_naive = tf.concat([kcs_naive, tf.expand_dims(kcs_single, 0)], axis=0)
             kcs_naive = kcs_naive[1:,:,:]
 
             #####################
@@ -229,15 +235,22 @@ def Critic_network(
             #return kcs_naive, kcs_vec_long, joints_tr
             ######################
 
+            kcs_naive = tf.reshape(kcs_naive, [-1, 169])
             kcs_fc_out = slim.fully_connected(kcs_naive, 100,
                                           activation_fn=tf.nn.leaky_relu,
                                           scope="kcs_fc")
 
+            joints = tf.reshape(joints, [-1, 42])
             direct_out = slim.fully_connected(joints, 100,
                                              activation_fn=tf.nn.leaky_relu,
                                              scope="direct_fc")
 
-            merged_out = tf.concat([kcs_fc_out, direct_out], 1)
+            print('joints', joints)
+            print('kcs_naive', kcs_naive)
+            merged_out = tf.concat([kcs_fc_out, direct_out], 0)
+            print('kcs_fc_out', kcs_fc_out)
+            print('direct_out', direct_out)
+            print('merged_out', merged_out)
             gan_out = slim.fully_connected(merged_out, 1,
                                           activation_fn=None,
                                           scope="wgan")
@@ -249,6 +262,9 @@ def Critic_network(
             shape_out = slim.fully_connected(
                shapes, 1, activation_fn=None, scope="shape_final")
 
+
+            print('gan_out', gan_out)
+            print('shape_out', shape_out)
             out = tf.concat([gan_out, shape_out], 1)
 
             variables = tf.contrib.framework.get_variables(scope)
