@@ -28,12 +28,12 @@ def main(config):
     # Load data on CPU
     with tf.device("/cpu:0"):
         data_loader = DataLoader(config)
-        train_dataset, test_dataset = data_loader.load(0.5)
-        #smpl_loader = data_loader.get_smpl_loader()
+        dataset = data_loader.load()
+        smpl_loader = data_loader.get_smpl_loader()
 
 #    iterator = dataset.make_one_shot_iterator()
 
-    trainer = HMRTrainer(config, train_dataset, test_dataset)
+    trainer = HMRTrainer(config, dataset, smpl_loader)
     save_config(config)
     trainer.train()
 

@@ -49,9 +49,6 @@ class HMRTrainer(object):
         # Config + path
         self.config = config
 
-        self.train_dataset = train_dataset
-        self.test_dataset = test_dataset
-
         self.model_dir = config.model_dir
         print('model dir: %s', self.model_dir)
         self.load_path = config.load_path
@@ -94,7 +91,7 @@ class HMRTrainer(object):
         self.num_itr_per_epoch = num_images / self.batch_size
         self.num_mocap_itr_per_epoch = num_mocap / self.batch_size
 
-        self.val_step = config.val_step_size
+        self.val_step = config.validation_step_size
 
         #####################################################################
         # OUR CODE
@@ -135,7 +132,7 @@ class HMRTrainer(object):
         if not self.encoder_only:
             critic_dataset = mocap_dataset.shuffle(buffer_size=10000).repeat()
             critic_dataset = critic_dataset.batch(self.batch_size*3)
-            self.critic_iterator = critic_dataset.make_one_shot_iterator()
+            self.critic_iterator = critic_dataset.make_initializable_iterator()
             self.joints, self.real_shapes = self.critic_iterator.get_next()
 
         #####################################################################
@@ -159,6 +156,15 @@ class HMRTrainer(object):
 
         self.global_step = tf.Variable(0, name='global_step', trainable=False)
         self.log_img_step = config.log_img_step
+
+        # For visualization:
+        num2show = np.minimum(6, self.batch_size)
+        # Take half from front & back
+        self.show_these = tf.constant(
+            np.hstack(
+                [np.arange(num2show / 2), self.batch_size - np.arange(3) - 1]),
+            tf.int32)
+
 
         self.validation_step_size = config.validation_step_size
         # Model spec

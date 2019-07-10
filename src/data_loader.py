@@ -72,7 +72,7 @@ class DataLoader(object):
     def load(self):
         image_loader = self.get_loader()
 
-        return train, test
+        return image_loader
 
     def get_loader(self, train_test_split=1):
         """
@@ -104,6 +104,7 @@ class DataLoader(object):
             files += glob(data_dir)
 
         if len(files) == 0:
+            print('At dir', data_dirs)
             print('Couldnt find any files!!')
             import ipdb
             ipdb.set_trace()
@@ -122,7 +123,8 @@ class DataLoader(object):
 
 
     def preprocess_poses(self, pose, shape):
-        verts, joints, rotations = self.smpl(shape, pose, get_skin=True)
+        print('preprocess_poses with pose', pose, 'and shape', shape)
+        verts, joints, rotations = self.smpl(tf.expand_dims(shape,0), pose, get_skin=True)
 
         return joints, shape
 
