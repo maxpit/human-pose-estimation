@@ -76,7 +76,7 @@ def parse_example_proto(example_serialized, has_3d=False):
 
     label = tf.concat([x, y, vis], 0)
     label = tf.concat([label, face_pts], 1)
-    
+
     print(height)
     print(width)
 
@@ -87,7 +87,7 @@ def parse_example_proto(example_serialized, has_3d=False):
 
     image = decode_jpeg(features['image/encoded'],3)
     seg_gt= decode_jpeg(features['image/seg_gt'],1)
-      
+
     image = tf.reshape(image, image_shape)
     seg_gt= tf.reshape(seg_gt, annotation_shape)
 
@@ -145,16 +145,14 @@ def get_all_files(dataset_dir, datasets, split='train'):
     return data_dirs#all_files
 
 
-def read_smpl_data(filename_queue):
+def parse_mocap_example(example_serialized):
     """
     Parses a smpl Example proto.
     It's contents are:
         'pose'  : 72-D float
         'shape' : 10-D float
     """
-    with tf.name_scope(None, 'read_smpl_data', [filename_queue]):
-        reader = tf.TFRecordReader()
-        _, example_serialized = reader.read(filename_queue)
+    with tf.name_scope(None, 'read_smpl_data', example_serialized):
 
         feature_map = {
             'pose': tf.FixedLenFeature((72, ), dtype=tf.float32),
@@ -166,8 +164,6 @@ def read_smpl_data(filename_queue):
         shape = tf.cast(features['shape'], dtype=tf.float32)
 
         return pose, shape
-
-
 
 def decode_jpeg(image_buffer, ch,  name=None):
     """Decode a JPEG string into one 3-D float image Tensor.

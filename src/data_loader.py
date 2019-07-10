@@ -11,6 +11,7 @@ from glob import glob
 
 import tensorflow as tf
 
+from .tf_smpl.batch_smpl import SMPL
 from .tf_smpl.batch_lbs import batch_rodrigues
 from .util import data_utils
 
@@ -64,6 +65,10 @@ class DataLoader(object):
 
         self.image_normalizing_fn = data_utils.rescale_image
 
+        self.smpl_model_path = config.smpl_model_path
+        self.smpl = SMPL(self.smpl_model_path)
+
+
     def load(self):
         image_loader = self.get_loader()
 
@@ -110,32 +115,25 @@ class DataLoader(object):
         files = list of tf records.
         """
         with tf.name_scope('input_smpl_loader'):
-            filename_queue = tf.train.string_input_producer(
-                files, shuffle=True)
+            dataset = tf.data.TFRecordDataset(files)
+            mocap_dataset = dataset.map(data_utils.parse_mocap_example)
+            mocap_dataset = mocap_dataset.map(self.preprocess_poses)
+            return mocap_dataset
 
-            mosh_batch_size = self.batch_size * self.config.num_stage
 
-            min_after_dequeue = 1000
-            capacity = min_after_dequeue + 3 * mosh_batch_size
+    def preprocess_poses(self, pose, shape):
+        verts, joints, rotations = self.smpl(shape, pose, get_skin=True)
 
-            pose, shape = data_utils.read_smpl_data(filename_queue)
-            pose_batch, shape_batch = tf.train.batch(
-                [pose, shape],
-                batch_size=mosh_batch_size,
-                num_threads=4,
-                capacity=capacity,
-                name='input_smpl_batch')
-
-            return pose_batch, shape_batch
+        return joints, shape
 
     def read_data(self, filenames):
-        with tf.name_scope(None, 'read_data', filenames): 
+        with tf.name_scope(None, 'read_data', filenames):
             dataset = tf.data.TFRecordDataset(filenames)
 
             dataset = dataset.map(data_utils.parse_example_proto)
             dataset = dataset.map(self.image_preprocessing)
 
-            return dataset 
+            return dataset
 
     def image_preprocessing(self,
                             image,

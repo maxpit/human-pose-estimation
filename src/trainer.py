@@ -19,6 +19,7 @@ from .tf_smpl.projection import batch_orth_proj_idrot
 from .tf_smpl.projection import reproject_vertices
 
 from tensorflow.python.ops import control_flow_ops
+from tensorflow.python.ops.losses import losses
 
 from time import time
 import tensorflow as tf
@@ -32,7 +33,7 @@ from .util import renderer as vis_util
 #from .util.data_utils import get_silhouette_from_seg_im as get_sil
 
 class HMRTrainer(object):
-    def __init__(self, config, dataset, mocap_loader = None):
+    def __init__(self, config, dataset, mocap_dataset = None):
         """
         Args:
           config
@@ -40,7 +41,7 @@ class HMRTrainer(object):
               data_loader is a dict
           else
               data_loader is a dict
-        mocap_loader is a tuple (pose, shape)
+        mocap_dataset is a tuple (pose, shape)
         """
         # Config + path
         self.config = config
@@ -88,6 +89,12 @@ class HMRTrainer(object):
 
         self.val_step = config.val_step_size
 
+        #####################################################################
+        # OUR CODE
+        #####################################################################
+
+        ## Build datasets
+
         # Create train and validation dataset from dataset with given train/val
         # split
 
@@ -109,14 +116,25 @@ class HMRTrainer(object):
         else:
             self.use_val = False
             dataset = dataset.shuffle(buffer_size=10000).repeat()
+            dataset = dataset.batch(self.batch_size)
             self.iterator = dataset.make_one_shot_iterator()
-
 
         # Formats
         # image: B x H x W x 3
         # seg_gt: B x H x W x 1
         # kp_gt: B x 19 x 3
         self.image, self.seg_gt, self.kp_gt = self.iterator.get_next()
+
+        if not self.encoder_only:
+            critic_dataset = mocap_dataset.shuffle(buffer_size=10000).repeat()
+            critic_dataset = critic_dataset.batch(self.batch_size*3)
+            self.critic_iterator = critic_dataset.make_one_shot_iterator()
+            self.joints, self.real_shapes = self.critic_iterator.get_next()
+
+        #####################################################################
+        # END OF OUR CODE
+        #####################################################################
+
         self.a = tf.reshape(self.kp_gt, (-1,3))
         # First make sure data_format is right
         if self.data_format == 'NCHW':
@@ -131,8 +149,6 @@ class HMRTrainer(object):
 #            self.has_gt3d_joints = data_loader['has3d'][:, 0]
 #            self.has_gt3d_smpl = data_loader['has3d'][:, 1]
 
-        #self.pose_loader = mocap_loader[0]
-        #self.shape_loader = mocap_loader[1]
 
         self.global_step = tf.Variable(0, name='global_step', trainable=False)
         self.log_img_step = config.log_img_step
@@ -162,19 +178,19 @@ class HMRTrainer(object):
         self.mesh_repro_loss = mesh_reprojection_loss
 
         # Optimizer, learning rate
-        self.e_lr = config.e_lr
-        self.d_lr = config.d_lr
+        self.generator_lr = config.generator_lr
+        self.critic_lr = config.critic_lr
         # Weight decay
         self.e_wd = config.e_wd
         self.d_wd = config.d_wd
-        self.e_loss_weight = config.e_loss_weight
-        self.d_loss_weight = config.d_loss_weight
+        self.generator_loss_weight = config.generator_loss_weight
+        self.critic_loss_weight = config.critic_loss_weight
         self.e_3d_weight = config.e_3d_weight
 
         self.mr_loss_weight = config.mr_loss_weight
 
-        self.optimizer = tf.train.AdamOptimizer
-
+        self.generator_optimizer = tf.train.AdamOptimizer
+        self.critic_optimizer = tf.train.RMSPropOptimizer
         # Instantiate SMPL
         self.smpl = SMPL(self.smpl_model_path)
         self.E_var = []
@@ -206,7 +222,8 @@ class HMRTrainer(object):
         self.sess_config = tf.ConfigProto()
         self.sess_config.gpu_options.per_process_gpu_memory_fraction = 0.88
 
-        self.summary_writer = tf.summary.FileWriter(self.model_dir+'train')
+        self.summery_writer_train = tf.summary.FileWriter(self.model_dir+'train')
+        self.summary_writer_critic = tf.summary.FileWriter(self.model_dir+'critic')
         self.summary_writer_val = tf.summary.FileWriter(self.model_dir+'val')
         self.sv = tf.train.MonitoredTrainingSession(
             summary_dir=self.model_dir,
@@ -257,7 +274,6 @@ class HMRTrainer(object):
     def build_model(self):
         img_enc_fn, threed_enc_fn = get_encoder_fn_separate(self.model_type)
         # Extract image features.
-
         self.isTraining = tf.placeholder(tf.bool)
 
         self.img_feat, self.E_var = img_enc_fn(
@@ -269,7 +285,7 @@ class HMRTrainer(object):
         if self.use_3d_label:
             loss_3d_joints, loss_3d_params = [], []
         # For discriminator
-        fake_rotations, fake_shapes = [], []
+        fake_joints, fake_shapes = [], []
         # Start loop
         # 85D
         theta_prev = self.load_mean_param()
@@ -310,7 +326,7 @@ class HMRTrainer(object):
             poses = theta_here[:, self.num_cam:(self.num_cam + self.num_theta)]
             shapes = theta_here[:, (self.num_cam + self.num_theta):]
             # Rs_wglobal is Nx24x3x3 rotation matrices of poses
-            verts, Js, pred_Rs = self.smpl(shapes, poses, get_skin=True)
+            verts, joints, pred_Rs = self.smpl(shapes, poses, get_skin=True)
 
                 # --- Compute losses:
             '''
@@ -336,9 +352,9 @@ class HMRTrainer(object):
             '''
 
             pred_kp = batch_orth_proj_idrot(
-                Js, cams, name='proj2d_stage%d' % i)
+                joints, cams, name='proj2d_stage%d' % i)
             if(not self.use_mesh_repro_loss):
-                loss_kps.append(self.e_loss_weight * self.keypoint_loss(
+                loss_kps.append(self.generator_loss_weight * self.keypoint_loss(
                         self.kp_gt, pred_kp))
             if(self.use_mesh_repro_loss):
                 print("seg_gt: ", self.seg_gt)
@@ -361,12 +377,12 @@ class HMRTrainer(object):
             pred_Rs = tf.reshape(pred_Rs, [-1, 24, 9])
             if self.use_3d_label:
                 loss_poseshape, loss_joints = self.get_3d_loss(
-                    pred_Rs, shapes, Js)
+                    pred_Rs, shapes, joints)
                 loss_3d_params.append(loss_poseshape)
                 loss_3d_joints.append(loss_joints)
 
             # Save pred_rotations for Discriminator
-            fake_rotations.append(pred_Rs[:, 1:, :])
+            fake_joints.append(joints)
             fake_shapes.append(shapes)
 
             # Save things for visualiations:
@@ -381,32 +397,36 @@ class HMRTrainer(object):
             theta_prev = theta_here
 
         if not self.encoder_only:
-            self.setup_discriminator(fake_rotations, fake_shapes)
+            self.setup_critic(fake_joints, fake_shapes)
 
         # Gather losses.
-        with tf.name_scope("gather_e_loss"):
+        with tf.name_scope("gather_generator_loss"):
             # Just the last loss.
-            self.e_loss_kp = loss_kps[-1]
+            self.generator_loss_kp = loss_kps[-1]
             if self.use_mesh_repro_loss:
-                self.e_loss_mr = loss_mr[-1] 
+                self.generator_loss_mr = loss_mr[-1] 
             else:
-                self.e_loss_mr = 0
+                self.generator_loss_mr = 0
 
             if self.encoder_only:
-                self.e_loss = self.e_loss_kp + self.e_loss_mr
+                self.generator_loss = self.generator_loss_kp + self.generator_loss_mr
             else:
-                self.e_loss = self.d_loss_weight * self.e_loss_disc + self.e_loss_kp
+                self.generator_loss = (-self.critic_loss_weight * self.critic_loss_fake)\
+                                         + self.generator_loss_kp\
+                                         + self.generator_loss_mr
 
             if self.use_3d_label:
-                self.e_loss_3d = loss_3d_params[-1]
-                self.e_loss_3d_joints = loss_3d_joints[-1]
+                self.generator_loss_3d = loss_3d_params[-1]
+                self.generator_loss_3d_joints = loss_3d_joints[-1]
 
-                self.e_loss += (self.e_loss_3d + self.e_loss_3d_joints)
+                self.generator_loss += (self.generator_loss_3d + self.generator_loss_3d_joints)
 
         if not self.encoder_only:
-            with tf.name_scope("gather_d_loss"):
-                self.d_loss = self.d_loss_weight * (
-                    self.d_loss_real + self.d_loss_fake)
+            with tf.name_scope("gather_critic_loss"):
+                self.critic_loss = self.critic_loss_weight * (
+                    (self.critic_loss_fake - self.critic_loss_real)
+                )
+                    #* self.c_lamda *  )
 
         # For visualizations, only save selected few into:
         # B x T x ...
@@ -431,128 +451,91 @@ class HMRTrainer(object):
         print('collecting batch norm moving means!!')
         bn_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
         if bn_ops:
-            self.e_loss = control_flow_ops.with_dependencies(
-                [tf.group(*bn_ops)], self.e_loss)
+            self.generator_loss = control_flow_ops.with_dependencies(
+                [tf.group(*bn_ops)], self.generator_loss)
 
         # Setup optimizer
         print('Setting up optimizer..')
-        d_optimizer = self.optimizer(self.d_lr)
-        e_optimizer = self.optimizer(self.e_lr)
+        critic_optimizer = self.critic_optimizer(self.critic_lr)
+        generator_optimizer = self.generator_optimizer(self.generator_lr)
 
         #with tf.Session() as sess:
         #    writer = tf.summary.FileWriter("./logs", sess.graph)
         #self.setup_summaries(loss_kps) # remove later
-        self.e_opt = e_optimizer.minimize(
-            self.e_loss, global_step=self.global_step, var_list=self.E_var)
+        self.generator_opt = generator_optimizer.minimize(
+            self.generator_loss, global_step=self.global_step, var_list=self.E_var)
         if not self.encoder_only:
-            self.d_opt = d_optimizer.minimize(self.d_loss, var_list=self.D_var)
+            self.critic_opt = critic_optimizer.minimize(self.critic_loss, var_list=self.D_var)
 
         self.setup_summaries(loss_kps)
 
         print('Done initializing trainer!')
 
     def setup_summaries(self, loss_kps):
+        self.summary_loss = self.generator_loss 
+
         # Prepare Summary
         always_report = [
-            tf.summary.scalar("loss/e_loss_kp_noscale",
-                              self.e_loss_kp / self.e_loss_weight),
-            tf.summary.scalar("loss/e_loss_mr_noscale", self.e_loss_mr /
-                              self.e_loss_weight),
-            tf.summary.scalar("loss/e_loss", self.e_loss),
+            tf.summary.scalar("loss/generator_loss_kp_noscale",
+                              self.generator_loss_kp / self.generator_loss_weight),
+            tf.summary.scalar("loss/generator_loss_mr_noscale", self.generator_loss_mr /
+                              self.generator_loss_weight),
+            tf.summary.scalar("loss/generator_loss", self.generator_loss),
+            tf.summary.scalar("loss/losses", self.summary_loss)
         ]
-        if self.encoder_only:
-            print('ENCODER ONLY!!!')
-        else:
-            always_report.extend([
-                tf.summary.scalar("loss/d_loss", self.d_loss),
-                tf.summary.scalar("loss/d_loss_fake", self.d_loss_fake),
-                tf.summary.scalar("loss/d_loss_real", self.d_loss_real),
-                tf.summary.scalar("loss/e_loss_disc",
-                                  self.e_loss_disc / self.d_loss_weight),
-            ])
-        # loss at each stage.
-        for i in np.arange(self.num_stage):
-            name_here = "loss/e_losses_noscale/kp_loss_stage%d" % i
-            always_report.append(
-                tf.summary.scalar(name_here, loss_kps[i] / self.e_loss_weight))
-        if self.use_3d_label:
-            always_report.append(
-                tf.summary.scalar("loss/e_loss_3d_params_noscale",
-                                  self.e_loss_3d / self.e_3d_weight))
-            always_report.append(
-                tf.summary.scalar("loss/e_loss_3d_joints_noscale",
-                                  self.e_loss_3d_joints / self.e_3d_weight))
 
         if not self.encoder_only:
-            summary_occ = []
-            # Report D output for each joint.
-            smpl_names = [
-                'Left_Hip', 'Right_Hip', 'Waist', 'Left_Knee', 'Right_Knee',
-                'Upper_Waist', 'Left_Ankle', 'Right_Ankle', 'Chest',
-                'Left_Toe', 'Right_Toe', 'Base_Neck', 'Left_Shoulder',
-                'Right_Shoulder', 'Upper_Neck', 'Left_Arm', 'Right_Arm',
-                'Left_Elbow', 'Right_Elbow', 'Left_Wrist', 'Right_Wrist',
-                'Left_Finger', 'Right_Finger'
-            ]
-            # d_out is 25 (or 24), last bit is shape, first 24 is pose
-            # 23(relpose) + 1(jointpose) + 1(shape) => 25
-            d_out_pose = self.d_out[:, :24]
-            for i, name in enumerate(smpl_names):
-                summary_occ.append(
-                    tf.summary.histogram("d_out/%s" % name, d_out_pose[i]))
-            summary_occ.append(
-                tf.summary.histogram("d_out/all_joints", d_out_pose[23]))
-            summary_occ.append(
-                tf.summary.histogram("d_out/beta", self.d_out[:, 24]))
+            always_report.extend([
+                tf.summary.scalar("loss/critic_loss", self.critic_loss),
+                tf.summary.scalar("loss/critic_loss_fake", self.critic_loss_fake),
+                tf.summary.scalar("loss/critic_loss_real", self.critic_loss_real),
+            ])
 
-            self.summary_op_occ = tf.summary.merge(
-                summary_occ, collections=['occasional'])
+        # loss at each stage.
+        for i in np.arange(self.num_stage):
+            name_here = "loss/generator_losses_noscale/kp_loss_stage%d" % i
+            always_report.append(
+                tf.summary.scalar(name_here, loss_kps[i] / self.generator_loss_weight))
+
         self.summary_op_always = tf.summary.merge(always_report)
 
-    def setup_discriminator(self, fake_rotations, fake_shapes):
-        # Compute the rotation matrices of "rea" pose.
-        # These guys are in 24 x 3.
-        real_rotations = batch_rodrigues(tf.reshape(self.pose_loader, [-1, 3]))
-        real_rotations = tf.reshape(real_rotations, [-1, 24, 9])
-        # Ignoring global rotation. N x 23*9
-        # The # of real rotation is B*num_stage so it's balanced.
-        real_rotations = real_rotations[:, 1:, :]
-        all_fake_rotations = tf.reshape(
-            tf.concat(fake_rotations, 0),
-            [self.batch_size * self.num_stage, -1, 9])
-        comb_rotations = tf.concat(
-            [real_rotations, all_fake_rotations], 0, name="combined_pose")
+    def setup_critic(self, fake_joints, fake_shapes):
+        self.isTrainingCritic = tf.placeholder(tf.bool)
 
-        comb_rotations = tf.expand_dims(comb_rotations, 2)
+        #TODO check if correct
+        all_fake_joints = tf.concat(fake_joints, 0)
+        combined_joints = tf.concat([self.joints, all_fake_joints], 0,
+                               name="combined_joints")
+
         all_fake_shapes = tf.concat(fake_shapes, 0)
-        comb_shapes = tf.concat(
-            [self.shape_loader, all_fake_shapes], 0, name="combined_shape")
+        combined_shapes = tf.concat([self.real_shapes, all_fake_shapes], 0, name="combined_shape")
 
         disc_input = {
             'weight_decay': self.d_wd,
-            'shapes': comb_shapes,
-            'poses': comb_rotations
+            'shapes': combined_shapes,
+            'joints': combined_joints
         }
 
-        self.d_out, self.D_var = Discriminator_separable_rotations(
-            **disc_input)
-
+        self.d_out, self.D_var = Critic_network(**disc_input,
+                                                is_training=self.isTrainingCritic)
         self.d_out_real, self.d_out_fake = tf.split(self.d_out, 2)
-        # Compute losses:
-        with tf.name_scope("comp_d_loss"):
-            self.d_loss_real = tf.reduce_mean(
-                tf.reduce_sum((self.d_out_real - 1)**2, axis=1))
-            self.d_loss_fake = tf.reduce_mean(
-                tf.reduce_sum((self.d_out_fake)**2, axis=1))
-            # Encoder loss
-            self.e_loss_disc = tf.reduce_mean(
-                tf.reduce_sum((self.d_out_fake - 1)**2, axis=1))
 
-    def get_3d_loss(self, Rs, shape, Js):
+        # Compute losses:
+        with tf.name_scope("comp_critic_loss"):
+            self.critic_loss_fake = losses.compute_weighted_loss(
+                        d_out_fake,
+                        generated_weights,
+                        "comp_critic_loss")
+            self.critic_loss_real = losses.compute_weighted_loss(
+                        d_out_real,
+                    real_weights,
+                    "comp_critic_loss")
+
+    def get_3d_loss(self, Rs, shape, joints):
         """
         Rs is N x 24 x 3*3 rotation matrices of pose
         Shape is N x 10
-        Js is N x 19 x 3 joints
+        joints is N x 19 x 3 joints
 
         Ground truth:
         self.poseshape_loader is a long vector of:
@@ -568,7 +551,7 @@ class HMRTrainer(object):
             params_pred, gt_params, self.has_gt3d_smpl)
         # 14*3 = 42
         gt_joints = self.poseshape_loader[:, 226:]
-        pred_joints = Js[:, :14, :]
+        pred_joints = joints[:, :14, :]
         # Align the joints by pelvis.
         pred_joints = align_by_pelvis(pred_joints)
         pred_joints = tf.reshape(pred_joints, [self.batch_size, -1])
@@ -616,7 +599,6 @@ class HMRTrainer(object):
         else:
             combined = np.hstack([skel_img, rend_img / 255.])
         return combined
-
 
     def draw_results(self, result, writer):
         import io
@@ -677,7 +659,6 @@ class HMRTrainer(object):
         writer.add_summary(
             img_summary, global_step=result['step'])
 
-
     def train(self):
         print('started training')
         # For rendering!
@@ -690,19 +671,23 @@ class HMRTrainer(object):
 
         print('...')
         with self.sv as sess:
-
+            feed_dict={self.isTraining: False, self.isTrainingCritic: False}
             if self.use_val:
-                sess.run(self.iterator_init_op_train,
-                         feed_dict={self.isTraining: True})
+                sess.run(self.iterator_init_op_train, feed_dict=feed_dict)
 
             while not self.sv.should_stop():
+
+                ####################################################
+                # Train Pose Prediction Network
+                ####################################################
+
                 fetch_dict = {
                     "summary": self.summary_op_always,
                     "step": self.global_step,
-                    "e_loss": self.e_loss,
+                    "generator_loss": self.generator_loss,
                     # The meat
-                    "e_opt": self.e_opt,
-                    "loss_kp": self.e_loss_kp
+                    "generator_opt": self.generator_opt,
+                    "loss_kp": self.generator_loss_kp
                     }
 
 
@@ -724,74 +709,105 @@ class HMRTrainer(object):
                             "seg_gt": self.show_segs,
                             "e_verts": self.all_verts,
                             "joints": self.all_pred_kps,
-                            #"seg": self.all_pred_silhouettes,
                             "cam": self.all_pred_cams,
                         })
 
 
+                feed_dict.update({self.isTraining: True})
                 t0 = time()
-                result = sess.run(fetch_dict, feed_dict={self.isTraining: True})
+                result = sess.run(fetch_dict, feed_dict=feed_dict)
                 t1 = time()
 
-                self.summary_writer.add_summary(
+                self.summery_writer_train.add_summary(
                     result['summary'], global_step=result['step'])
 
-                e_loss = result['e_loss']
+                generator_loss = result['generator_loss']
                 step = result['step']
 
                 epoch = float(step) / self.num_itr_per_epoch
                 if self.encoder_only:
                     print("itr %d/(epoch %.1f): time %g, Enc_loss: %.4f" %
-                          (step, epoch, t1 - t0, e_loss))
+                          (step, epoch, t1 - t0, generator_loss))
                 else:
-                    d_loss = result['d_loss']
+                    critic_loss = result['critic_loss']
                     print("itr %d/(epoch %.1f): time %g, Enc_loss: %.4f, Disc_loss: %.4f"
-                        % (step, epoch, t1 - t0, e_loss, d_loss))
+                        % (step, epoch, t1 - t0, generator_loss, critic_loss))
 
                 if step % self.log_img_step == 0:
                     if not self.encoder_only:
-                        self.summary_writer.add_summary(
+                        self.summery_writer_train.add_summary(
                             result['summary_occasional'],
                             global_step=result['step'])
                     print("DRAWING")
-                    self.draw_results(result, self.summary_writer)
+                    self.draw_results(result, self.summery_writer_train)
 
-                self.summary_writer.flush()
+                self.summery_writer_train.flush()
+
+                ####################################################
+                # Train Critic Network
+                ####################################################
+                if not self.encoder_only:
+                    fetch_dict = {
+                        "critic_opt": self.critic_opt,
+                        "critic_loss": self.critic_loss
+                        }
+
+                    feed_dict.update({self.isTrainingCritic: True,
+                                      self.isTraining: False})
+                    t0 = time()
+                    critic_result = sess.run(fetch_dict, feed_dict=feed_dict)
+                    t1 = time()
+
+                    print("Training critic - time: %g, loss: %.4f" % (t1 - t0,
+                                                                  critic_result["critic_loss"]))
+                    critic_feed_dict = feed_dict.update({self.summary_loss:
+                                                         critic_result['critic_loss']})
+                    critic_summ = sess.run(self.summary_op_always,
+                                           feed_dict=feed_dict)
+
+                    self.summary_writer_critic.add_summary(critic_summ,
+                                                           result['step'])
+
+                ####################################################
+                # Validation
+                ####################################################
 
                 if self.use_val:
                     if step % self.num_itr_per_epoch == 0:
                         val_step += 1
                         print("validation step")
 
+                        feed_dict.update({self.isTraining: False,
+                                          self.isTrainingCritic: False})
                         sess.run(self.iterator_init_op_val,
-                                 feed_dict={self.isTraining: False})
-                        e_loss_val = 0
+                                 feed_dict=feed_dict)
+                        generator_loss_val = 0
                         for i in range(int(self.num_itr_per_epoch)):
 
                             fetch_dict = {
-                                "e_loss": self.e_loss,
+                                "generator_loss": self.generator_loss,
                                 }
 
                             t0 = time()
                             result = sess.run(fetch_dict,
-                                              feed_dict={self.isTraining: False})
+                                              feed_dict=feed_dict)
                             t1 = time()
-                            val_loss = result['e_loss']
-                            e_loss_val = e_loss_val + val_loss
+                            val_loss = result['generator_loss']
+                            generator_loss_val = generator_loss_val + val_loss
 #                        if val_step % self.log_val_img_step == 0:
 #                            self.draw_results(result, self.summary_writer_val)
-                        print("validation e_loss mean:", e_loss_val/self.num_itr_per_epoch)
+                        print("validation generator_loss mean:", generator_loss_val/self.num_itr_per_epoch)
 
                         sum_result = sess.run(self.summary_op_always,
-                                  feed_dict = {self.e_loss:
-                                               e_loss_val/self.num_itr_per_epoch,
+                                  feed_dict = {self.generator_loss:
+                                               generator_loss_val/self.num_itr_per_epoch,
                                               self.isTraining: False})
                         self.summary_writer_val.add_summary(sum_result,
                                                                 global_step=step)
 
                         self.summary_writer_val.flush()
                         sess.run(self.iterator_init_op_train,
-                                 feed_dict={self.isTraining: False})
+                                 feed_dict=feed_dict)
 
                 if epoch > self.max_epoch:
                     break
