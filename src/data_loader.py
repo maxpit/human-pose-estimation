@@ -11,6 +11,7 @@ from glob import glob
 
 import tensorflow as tf
 
+from .tf_smpl.batch_smpl import SMPL
 from .tf_smpl.batch_lbs import batch_rodrigues
 from .util import data_utils
 
@@ -21,7 +22,7 @@ def num_examples(datasets):
     _NUM_TRAIN = {
         'lsp_few_new': 10,
         'lsp_few_new_1': 10,
-        'lsp': 1000,
+        'lsp': 2000,
         'lsp_ext': 10000,
         'lsp_single': 1,
         'lsp_single_new': 1,
@@ -64,8 +65,12 @@ class DataLoader(object):
 
         self.image_normalizing_fn = data_utils.rescale_image
 
-    def load(self, train_test_split=1):
-        train, test = self.get_loader(train_test_split)
+        self.smpl_model_path = config.smpl_model_path
+        self.smpl = SMPL(self.smpl_model_path)
+
+
+    def load(self):
+        image_loader = self.get_loader()
 
         return train, test
 
@@ -77,21 +82,11 @@ class DataLoader(object):
         """
         files = data_utils.get_all_files(self.dataset_dir, self.datasets)
 
-        do_shuffle = True
-
         print(files)
 
         dataset = self.read_data(files)
 
-        train_split = int(len(files)/train_test_split)
-
-        dataset = dataset.shuffle(buffer_size=10000)
-        train_dataset = dataset.take(train_split)
-        test_dataset = dataset.skip(train_split)
-
-        train_dataset = train_dataset.batch(self.batch_size)
-        test_dataset = test_dataset.batch(self.batch_size)
-        return train_dataset, test_dataset
+        return dataset
 
     def get_smpl_loader(self):
         """
@@ -120,32 +115,25 @@ class DataLoader(object):
         files = list of tf records.
         """
         with tf.name_scope('input_smpl_loader'):
-            filename_queue = tf.train.string_input_producer(
-                files, shuffle=True)
+            dataset = tf.data.TFRecordDataset(files)
+            mocap_dataset = dataset.map(data_utils.parse_mocap_example)
+            mocap_dataset = mocap_dataset.map(self.preprocess_poses)
+            return mocap_dataset
 
-            mosh_batch_size = self.batch_size * self.config.num_stage
 
-            min_after_dequeue = 1000
-            capacity = min_after_dequeue + 3 * mosh_batch_size
+    def preprocess_poses(self, pose, shape):
+        verts, joints, rotations = self.smpl(shape, pose, get_skin=True)
 
-            pose, shape = data_utils.read_smpl_data(filename_queue)
-            pose_batch, shape_batch = tf.train.batch(
-                [pose, shape],
-                batch_size=mosh_batch_size,
-                num_threads=4,
-                capacity=capacity,
-                name='input_smpl_batch')
-
-            return pose_batch, shape_batch
+        return joints, shape
 
     def read_data(self, filenames):
-        with tf.name_scope(None, 'read_data', filenames): 
+        with tf.name_scope(None, 'read_data', filenames):
             dataset = tf.data.TFRecordDataset(filenames)
 
             dataset = dataset.map(data_utils.parse_example_proto)
             dataset = dataset.map(self.image_preprocessing)
 
-            return dataset 
+            return dataset
 
     def image_preprocessing(self,
                             image,
@@ -174,14 +162,14 @@ class DataLoader(object):
             keypoints = label[:2, :]
 
             # Randomly shift center.
-#            print('Using translation jitter: %d' % self.trans_max)
-#            center = data_utils.jitter_center(center, self.trans_max)
-#            print("shifted center")
+            print('Using translation jitter: %d' % self.trans_max)
+            center = data_utils.jitter_center(center, self.trans_max)
+            print("shifted center")
 
             # randomly scale image.
-#            image, seg_gt, keypoints, center = data_utils.jitter_scale(
-#                image, seg_gt, image_size, keypoints, center, self.scale_range)
-#            print("scaled image")
+            image, seg_gt, keypoints, center = data_utils.jitter_scale(
+                image, seg_gt, image_size, keypoints, center, self.scale_range)
+            print("scaled image")
 
             # Pad image with safe margin.
             # Extra 50 for safety.
@@ -212,11 +200,11 @@ class DataLoader(object):
 #            print("crop", crop)
 #            print("crop_gt", crop_gt)
 #            print("crop_kp", crop_kp)
-#            if pose is not None and gt3d is not None:
-#                crop, crop_gt, crop_kp, new_pose, new_gt3d = data_utils.random_flip(
-#                    crop, crop_gt, crop_kp, pose, gt3d)
-#            else:
-#                crop, crop_gt, crop_kp = data_utils.random_flip(crop, crop_gt, crop_kp)
+            if pose is not None and gt3d is not None:
+                crop, crop_gt, crop_kp, new_pose, new_gt3d = data_utils.random_flip(
+                    crop, crop_gt, crop_kp, pose, gt3d)
+            else:
+                crop, crop_gt, crop_kp = data_utils.random_flip(crop, crop_gt, crop_kp)
 
             # Normalize kp output to [-1, 1]
             final_vis = tf.cast(crop_kp[2, :] > 0, tf.float32)

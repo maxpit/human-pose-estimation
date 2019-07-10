@@ -9,7 +9,7 @@ from os import makedirs
 from os.path import join, exists
 import numpy as np
 from glob import glob
-import cPickle as pickle
+import pickle
 
 import tensorflow as tf
 
@@ -58,7 +58,7 @@ def process_smpl_mocap(all_pkls, out_dir, num_shards, dataset_name):
     all_poses, all_shapes, all_shapes_unique = [], [], []
     for pkl in all_pkls:
         with open(pkl, 'rb') as f:
-            res = pickle.load(f)
+            res = pickle.load(f, encoding='latin1')
             if 'poses' in res.keys():
                 all_poses.append(res['poses'])
                 num_poses_here = res['poses'].shape[0]

@@ -31,9 +31,7 @@ def main(config):
         train_dataset, test_dataset = data_loader.load(0.5)
         #smpl_loader = data_loader.get_smpl_loader()
 
-    num_epochs = config.epoch
-    train_dataset = train_dataset.repeat(num_epochs)
-    test_dataset = test_dataset.repeat(num_epochs)
+#    iterator = dataset.make_one_shot_iterator()
 
     trainer = HMRTrainer(config, train_dataset, test_dataset)
     save_config(config)
