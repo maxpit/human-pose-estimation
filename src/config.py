@@ -36,9 +36,10 @@ flags.DEFINE_string('smpl_model_path', SMPL_MODEL_PATH,
 flags.DEFINE_string('smpl_face_path', SMPL_FACE_PATH,
                     'path to smpl mesh faces (for easy rendering)')
 flags.DEFINE_string('load_path', None, 'path to trained model')
-flags.DEFINE_string('pretrained_model_path', None,
+flags.DEFINE_string('pretrained_model_path',
+                    '/home/valentin/Code/ADL/human-pose-estimation/resnet_v2_50.ckpt',
                     'if not None, fine-tunes from this ckpt')
-flags.DEFINE_integer('batch_size', 2,
+flags.DEFINE_integer('batch_size', 8,
                      'Input image size to the network after preprocessing')
 
 # Don't change if testing:
@@ -49,29 +50,37 @@ flags.DEFINE_integer('num_stage', 3, '# of times to iterate regressor')
 flags.DEFINE_string('model_type', 'resnet_fc3_dropout',
                     'Specifies which network to use')
 flags.DEFINE_string(
-    'joint_type', 'cocoplus',
+    'joint_type', 'lsp',
     'cocoplus (19 keypoints) or lsp 14 keypoints, returned by SMPL')
 
 # Training settings:
 # TODO! If you want to train, change this to your 'tf_datasets' or specify it with the flag.
-DATA_DIR = '/home/valentin/Code/ADL/human-pose-estimation/simple_datasets'
+DATA_DIR = '/home/valentin/Code/ADL/human-pose-estimation/datasets'
 
 flags.DEFINE_string('data_dir', DATA_DIR, 'Where to save training models')
 flags.DEFINE_string('log_dir', 'logs', 'Where to save training models')
 flags.DEFINE_string('model_dir', None, 'Where model will be saved -- filled automatically')
-flags.DEFINE_integer('log_img_step', 100, 'How often to visualize img during training')
-flags.DEFINE_integer('epoch', 2, '# of epochs to train')
+flags.DEFINE_integer('validation_step_size', 500, 'How often to visualize img during training')
+flags.DEFINE_integer('log_img_step', 500, 'How often to visualize img during training')
+flags.DEFINE_float('train_val_split', 0.5, 'train_val_split')
+flags.DEFINE_integer('epoch', 60, '# of epochs to train')
 
-flags.DEFINE_list('datasets', ['lsp_few_new_1'],
+flags.DEFINE_list('datasets', ['lsp'],
                           'datasets to use for training')
 #flags.DEFINE_list('datasets', ['lsp', 'lsp_ext', 'mpii', 'coco'],
 #                          'datasets to use for training')
-flags.DEFINE_list('mocap_datasets', ['CMU', 'H3.6', 'jointLim'],
+flags.DEFINE_list('mocap_datasets', ['CMU', 'jointLim'],
                   'datasets to use for adversarial prior training')
 
 # Model config
 flags.DEFINE_boolean(
-    'encoder_only', True,
+    'use_mesh_repro_loss', False,
+    'use mesh reprojection loss')
+flags.DEFINE_boolean(
+    'use_kp_loss', True,
+    'use mesh reprojection loss')
+flags.DEFINE_boolean(
+    'encoder_only', False,
     'if set, no adversarial prior is trained = monsters')
 
 flags.DEFINE_boolean(
@@ -79,13 +88,14 @@ flags.DEFINE_boolean(
     'Uses 3D labels if on.')
 
 # Hyper parameters:
-flags.DEFINE_float('e_lr', 0.001, 'Encoder learning rate')
-flags.DEFINE_float('d_lr', 0.001, 'Adversarial prior learning rate')
+flags.DEFINE_float('generator_lr', 0.0001, 'Encoder learning rate')
+flags.DEFINE_float('critic_lr', 0.001, 'Adversarial prior learning rate')
 flags.DEFINE_float('e_wd', 0.0001, 'Encoder weight decay')
 flags.DEFINE_float('d_wd', 0.0001, 'Adversarial prior weight decay')
 
-flags.DEFINE_float('e_loss_weight', 60, 'weight on E_kp losses')
-flags.DEFINE_float('d_loss_weight', 1, 'weight on discriminator')
+flags.DEFINE_float('generator_loss_weight', 60, 'weight on E_kp losses')
+flags.DEFINE_float('mr_loss_weight', 0.001, 'weight on mesh reprojection loss')
+flags.DEFINE_float('critic_loss_weight', 1, 'weight on discriminator')
 
 
 flags.DEFINE_float('e_3d_weight', 1, 'weight on E_3d')
@@ -184,15 +194,15 @@ def prepare_dirs(config, prefix=['HMR']):
         if config.num_stage != 3:
             prefix += ["T%d" % config.num_stage]
 
-        postfix.append("Elr%1.e" % config.e_lr)
+        postfix.append("Elr%1.e" % config.generator_lr)
 
-        if config.e_loss_weight != 1:
-            postfix.append("kp-weight%g" % config.e_loss_weight)
+        if config.generator_loss_weight != 1:
+            postfix.append("kp-weight%g" % config.generator_loss_weight)
 
         if not config.encoder_only:
-            postfix.append("Dlr%1.e" % config.d_lr)
-            if config.d_loss_weight != 1:
-                postfix.append("d-weight%g" % config.d_loss_weight)
+            postfix.append("Dlr%1.e" % config.critic_lr)
+            if config.critic_loss_weight != 1:
+                postfix.append("d-weight%g" % config.critic_loss_weight)
 
         if config.use_3d_label:
             print('Using 3D labels!!')
@@ -217,7 +227,7 @@ def prepare_dirs(config, prefix=['HMR']):
         save_name = "%s_%s_%s" % (prefix, postfix, time_str)
         config.model_dir = osp.join(config.log_dir, save_name)
 
-    for path in [config.log_dir, config.model_dir]:
+    for path in [config.log_dir + "_train", config.log_dir + "_val", config.model_dir]:
         if not osp.exists(path):
             print('making %s' % path)
             makedirs(path)
