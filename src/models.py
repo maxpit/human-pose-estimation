@@ -206,37 +206,35 @@ def Critic_network(
     """
     with tf.name_scope("Critic_network", [joints, shapes]):
         with tf.variable_scope("Critic") as scope:
-           # with slim.arg_scope([slim.conv2d, slim.fully_connected],
-           #                     weights_regularizer=slim.l2_regularizer(weight_decay)):
-           #     with slim.arg_scope([slim.conv2d]):
-            kcs_naive = tf.Variable(tf.zeros(shape=(1, 13, 13)), trainable=False,
-                                    dtype=tf.float32)
-            print('C_matrix', C_matrix)
-            print('joints', joints)
+            ##############################################################
+            ### kcs_naive
+            # kcs_naive = tf.Variable(tf.zeros(shape=(1, 13, 13)), trainable=False,
+            #                         dtype=tf.float32)
+            # print('C_matrix', C_matrix)
+            # print('joints', joints)
+            #
+            # joints = joints[:,:14,:]
+            #
+            # for i in range(batch_size):
+            #     kcs_single = tf.matmul(tf.matmul(tf.transpose(C_matrix), tf.matmul(joints[i], tf.transpose(joints[i]))), C_matrix)
+            #     #kcs = tf.assign(kcs[i], tf.cast(kcs_single, tf.float32))
+            #     kcs_naive = tf.concat([kcs_naive, tf.expand_dims(kcs_single, 0)], axis=0)
+            #
+            # kcs_naive = kcs_naive[1:,:,:]
+            # kcs_flattened = tf.reshape(kcs_naive, [-1, 169])
+            #############################################################
 
-            joints = joints[:,:14,:]
+            ### kcs_vec
+            joints = joints[:, :14, :]
+            joints_tr = tf.transpose(joints, perm=[0, 2, 1])
+            B = tf.tensordot(joints_tr, C_matrix, 1)
+            B_tr = tf.transpose(B, perm=[0, 2, 1])
+            kcs_long = tf.tensordot(B_tr, tf.transpose(B_tr), 1)
+            kcs_diag = tf.matrix_diag_part(tf.transpose(kcs_long,[1,2,0,3]))
+            kcs = tf.transpose(kcs_diag, [2, 0, 1])
+            kcs_flattened = tf.reshape(kcs, [-1, 169])
 
-            for i in range(batch_size):
-                kcs_single = tf.matmul(tf.matmul(tf.transpose(C_matrix), tf.matmul(joints[i], tf.transpose(joints[i]))), C_matrix)
-                #kcs = tf.assign(kcs[i], tf.cast(kcs_single, tf.float32))
-                kcs_naive = tf.concat([kcs_naive, tf.expand_dims(kcs_single, 0)], axis=0)
-            kcs_naive = kcs_naive[1:,:,:]
-
-            #####################
-            # kcs_vec
-            # joints_tr = tf.transpose(joints, perm=[0, 2, 1])
-            # print(joints_tr)
-            # B = tf.tensordot(joints_tr, C_matrix, 1)
-            # print("B", B)
-            # B_tr = tf.transpose(B, perm=[0, 2, 1])
-            # print("B_tr", B_tr)
-            # kcs_vec_long = tf.tensordot(B_tr, tf.transpose(B_tr), 1)
-            # arange = tf.gather_nd(kcs_vec_long, tf.range(batch_size))
-            #return kcs_naive, kcs_vec_long, joints_tr
-            ######################
-
-            kcs_naive = tf.reshape(kcs_naive, [-1, 169])
-            kcs_fc_out = slim.fully_connected(kcs_naive, 100,
+            kcs_fc_out = slim.fully_connected(kcs_flattened, 100,
                                           activation_fn=tf.nn.leaky_relu,
                                           scope="kcs_fc")
 
@@ -246,7 +244,7 @@ def Critic_network(
                                              scope="direct_fc")
 
             print('joints', joints)
-            print('kcs_naive', kcs_naive)
+            print('kcs', kcs)
             merged_out = tf.concat([kcs_fc_out, direct_out], 0)
             print('kcs_fc_out', kcs_fc_out)
             print('direct_out', direct_out)
@@ -271,7 +269,7 @@ def Critic_network(
             return out, variables
 
 ###########################################
-# batch_size = 1
+# batch_size = 2
 #
 # head = np.array([0., 0., 3.])
 # neck = np.array([0., 0., 2.5])
@@ -299,25 +297,29 @@ def Critic_network(
 #                    right_wrist, right_elbow, right_shoulder, left_shoulder, left_elbow, left_wrist,
 #                    neck, head))
 #
+# joints[1] = np.stack((right_foot, right_knee + np.array([2, 0, 1]), right_hip, left_hip, left_knee, left_foot,
+#                    right_wrist, right_elbow + np.array([4, 2, 9]), right_shoulder, left_shoulder + np.array([2, 2, 2]), left_elbow, left_wrist,
+#                    neck, head + np.array([2, 0, 0])))
+#
 # print("joints.shape: ", joints.shape)
 #
-# joints_tf = tf.constant(joints)
+# joints_tf = tf.constant(joints, tf.float32)
 #
-# kcs_naive, kcs_vec_long, joints_tr = Critic_network(joints_tf, shapes, weight_decay, C, batch_size)
+# kcs, kcs_flattened = Critic_network(joints_tf, shapes, weight_decay, C, batch_size)
 # print("test")
 # init = tf.global_variables_initializer()
 # with tf.Session() as sess:
 #     sess.run(init)
-#     kcs_result = sess.run(kcs_naive)
-#     kcs_vec_result = sess.run(kcs_vec_long)
-#     joints_tr_result = sess.run(joints_tr)
+#     kcs_result = sess.run(kcs)
+#     kcs_flattened_result = sess.run(kcs_flattened)
+#
 #     print("kcs_result.shape: ", kcs_result.shape)
-#     print("kcs_vec_result.shape: ", kcs_vec_result.shape)
-#     print("kcs_vec_result: ", kcs_vec_result)
-#     print("joints_tr_result.shape: ", joints_tr_result.shape)
+#     print("kcs_result.shape: ", kcs_flattened_result.shape)
 #     print("kcs_result = ")
 #     print(kcs_result)
-#     diag = kcs_result[0, np.arange(kcs_result.shape[1]), np.arange(kcs_result.shape[2])]
+#     print("kcs_flattened_result = ")
+#     print(kcs_flattened_result)
+#     diag = kcs_result[:, np.arange(kcs_result.shape[1]), np.arange(kcs_result.shape[2])]
 #     print("bone_lengths: ", np.sqrt(diag))
 #     joints_result = sess.run(joints_tf)[0]
 #     C_result = sess.run(C)
@@ -326,8 +328,6 @@ def Critic_network(
 #     print("C_result: ", C_result.shape)
 #     print("B: ", B.shape)
 #
-#     diff = np.sum(kcs_vec_result[0,:,:,0] - kcs_result[1])
-#     print("diff: ", diff)
 #     import matplotlib.pyplot as plt
 #     from mpl_toolkits.mplot3d import Axes3D
 #     fig = plt.figure()
