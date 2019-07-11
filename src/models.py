@@ -16,10 +16,12 @@ from __future__ import division
 from __future__ import print_function
 
 import tensorflow as tf
-import tensorflow.contrib.slim as slim
-
-from tensorflow.contrib.layers.python.layers.initializers import variance_scaling_initializer
+#import tensorflow.contrib.slim as slim
+import tensorflow.keras.layers as layers
+import tensorflow.keras as keras
+#from tensorflow.contrib.layers.python.layers.initializers import variance_scaling_initializer
 import numpy as np
+import math
 
 
 def Encoder_resnet(x, is_training=True, weight_decay=0.001, reuse=False):
@@ -37,19 +39,21 @@ def Encoder_resnet(x, is_training=True, weight_decay=0.001, reuse=False):
     - Shape vector: N x 10
     - variables: tf variables
     """
-    from tensorflow.contrib.slim.python.slim.nets import resnet_v2
+    import tensorflow.keras.applications as apps
     with tf.name_scope("Encoder_resnet", [x]):
-        with slim.arg_scope(
-                resnet_v2.resnet_arg_scope(weight_decay=weight_decay)):
-            net, end_points = resnet_v2.resnet_v2_50(
-                x,
-                num_classes=None,
-                is_training=is_training,
-                reuse=reuse,
-                scope='resnet_v2_50')
-            net = tf.squeeze(net, axis=[1, 2])
-    variables = tf.contrib.framework.get_variables('resnet_v2_50')
-    return net, variables
+        resnet = apps.ResNet50(include_top=False, weights='imagenet', pooling='avg')
+        #resnet.trainable = is_training
+    return resnet
+
+    #         net, end_points = resnet_v2.resnet_v2_50(
+    #             x,
+    #             num_classes=None,
+    #             is_training=is_training,
+    #             reuse=reuse,
+    #             scope='resnet_v2_50')
+    #         net = tf.squeeze(net, axis=[1, 2])
+    # variables = tf.contrib.framework.get_variables('resnet_v2_50')
+    # return net, variables
 
 
 def Encoder_fc3_dropout(x,
@@ -75,22 +79,31 @@ def Encoder_fc3_dropout(x,
     if reuse:
         print('Reuse is on!')
     with tf.variable_scope(name, reuse=reuse) as scope:
-        net = slim.fully_connected(x, 1024, scope='fc1')
-        net = slim.dropout(net, 0.5, is_training=is_training, scope='dropout1')
-        net = slim.fully_connected(net, 1024, scope='fc2')
-        net = slim.dropout(net, 0.5, is_training=is_training, scope='dropout2')
-        small_xavier = variance_scaling_initializer(
-            factor=.01, mode='FAN_AVG', uniform=True)
-        net = slim.fully_connected(
-            net,
-            num_output,
-            activation_fn=None,
-            weights_initializer=small_xavier,
-            scope='fc3')
+        model = keras.Sequential()
+        model.add(layers.Dense(1024, activation='relu', input_shape=x.shape[1:]))
+        model.add(layers.Dropout(0.5))
+        model.add(layers.Dense(1024, activation='relu'))
+        model.add(layers.Dropout(0.5))
+        limit = math.sqrt(3.0 * 0.02 / (1024+num_output))
+        model.add(layers.Dense(num_output, kernel_initializer=keras.initializers.RandomUniform(-limit, limit)))
+        #TODO: check wether weight initializer is same
+    return model
 
-    variables = tf.contrib.framework.get_variables(scope)
-    return net, variables
-
+    #     net = slim.fully_connected(x, 1024, scope='fc1')
+    #     net = slim.dropout(net, 0.5, is_training=is_training, scope='dropout1')
+    #     net = slim.fully_connected(net, 1024, scope='fc2')
+    #     net = slim.dropout(net, 0.5, is_training=is_training, scope='dropout2')
+    #     small_xavier = variance_scaling_initializer(
+    #         factor=.01, mode='FAN_AVG', uniform=True)
+    #     net = slim.fully_connected(
+    #         net,
+    #         num_output,
+    #         activation_fn=None,
+    #         weights_initializer=small_xavier,
+    #         scope='fc3')
+    #
+    # variables = tf.contrib.framework.get_variables(scope)
+    # return net, variables
 
 def get_encoder_fn_separate(model_type):
     """
@@ -170,7 +183,6 @@ def precompute_C_matrix():
     return C
 
 
-
 def Critic_network(
         joints,
         shapes,
@@ -233,6 +245,39 @@ def Critic_network(
             kcs_diag = tf.matrix_diag_part(tf.transpose(kcs_long,[1,2,0,3]))
             kcs = tf.transpose(kcs_diag, [2, 0, 1])
             kcs_flattened = tf.reshape(kcs, [-1, 169])
+
+            # the first branch operates on the first input
+            first = keras.Sequential()
+            first.add(layers.Dense(100, activation=tf.nn.leaky_relu, input_shape=kcs_flattened.shape[1:]))
+            second = keras.Sequential()
+            joints = tf.reshape(joints, [-1, 42])
+            second.add(layers.Dense(100, activation=tf.nn.leaky_relu, input_shape=joints.shape[1:]))
+
+            merged = tf.concat([first, second], 0)
+            merged.add(layers.Dense(1, input_shape=merged.shape[1:]))
+
+            # the second branch opreates on the second input
+            y = layers.Dense(64, activation="relu")(inputB)
+            y = layers.Dense(32, activation="relu")(y)
+            y = Dense(4, activation="relu")(y)
+            y = Model(inputs=inputB, outputs=y)
+
+            # combine the output of the two branches
+            combined = concatenate([x.output, y.output])
+
+            # apply a FC layer and then a regression prediction on the
+            # combined outputs
+            z = Dense(2, activation="relu")(combined)
+            z = Dense(1, activation="linear")(z)
+
+            # our model will accept the inputs of the two branches and
+            # then output a single value
+            model = Model(inputs=[x.input, y.input], outputs=z)
+
+            critic_model = keras.Sequential()
+            critic_model.add(layers.Dense(100, activation='relu', input_shape=kcs_flattened.shape[1:], ))
+
+
 
             kcs_fc_out = slim.fully_connected(kcs_flattened, 100,
                                           activation_fn=tf.nn.leaky_relu,

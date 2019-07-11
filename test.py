@@ -6,21 +6,21 @@ import sys
 from absl import flags
 import numpy as np
 
-import skimage.io as io
+#import skimage.io as io
 import tensorflow as tf
 import matplotlib.pyplot as plt
 
-from src.util import renderer as vis_util
+#from src.util import renderer as vis_util
 from src.util import image as img_util
 from src.util import openpose as op_util
 import src.config as config
 from src.config import get_config, prepare_dirs, save_config
 from src.data_loader import DataLoader
-from src.RunModel import RunModel
-from src.util.load_data import example_run
+#from src.RunModel import RunModel
+#from src.util.load_data import example_run
 from src.trainer import HMRTrainer
 
-import src.util.data_utils as du
+#import src.util.data_utils as du
 
 def main(config):
     prepare_dirs(config)
