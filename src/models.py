@@ -182,14 +182,201 @@ def precompute_C_matrix():
     #    print(c)
     return C
 
+# def Critic_network(
+#         joints,
+#         shapes,
+#         weight_decay,
+#         C_matrix,
+#         batch_size
+# ):
+#     """
+#     Critic network adapted from
+#     "RepNet: Weakly Supervised Training of an Adversarial Reprojection Network for 3D Human Pose Estimation"
+#     and Discriminator adapted from
+#     "End-to-end Recovery of Human Shape and Pose"
+#
+#     Input:
+#     - joints: N x num_joints x 3
+#     - shapes: N x 10
+#     - weight_decay: float
+#     - C_matrix: num_joints x num_bones
+#
+#     Outputs:
+#     - prediction: N x (1+23) or N x (1+23+1) if do_joint is on.
+#     - variables: tf variables
+#
+#        joints:
+#        0: right foot; 1: right knee; 2: right hip; 3: left hip; 4: left knee; 5: left foot; 6: right wrist
+#        7: right elbow; 8: right shoulder; 9: left shoulder; 10: left elbow; 11: left wrist; 12: neck;
+#        13: head; 14-18: head/face
+#
+#        bones:
+#        0: right shin; 1: right thigh; 2: right side; 3: left side; 4: left thigh; 5: left shin; 6: right forearm;
+#        7: right upper arm; 8: right collarbone; 9: left collarbone; 10: left upper arm; 11: left forearm; 12: neck;
+#        13-?: face
+#     """
+#     with tf.name_scope("Critic_network", [joints, shapes]):
+#         with tf.variable_scope("Critic") as scope:
+#             ##############################################################
+#             ### kcs_naive
+#             # kcs_naive = tf.Variable(tf.zeros(shape=(1, 13, 13)), trainable=False,
+#             #                         dtype=tf.float32)
+#             # print('C_matrix', C_matrix)
+#             # print('joints', joints)
+#             #
+#             # joints = joints[:,:14,:]
+#             #
+#             # for i in range(batch_size):
+#             #     kcs_single = tf.matmul(tf.matmul(tf.transpose(C_matrix), tf.matmul(joints[i], tf.transpose(joints[i]))), C_matrix)
+#             #     #kcs = tf.assign(kcs[i], tf.cast(kcs_single, tf.float32))
+#             #     kcs_naive = tf.concat([kcs_naive, tf.expand_dims(kcs_single, 0)], axis=0)
+#             #
+#             # kcs_naive = kcs_naive[1:,:,:]
+#             # kcs_flattened = tf.reshape(kcs_naive, [-1, 169])
+#             #############################################################
+#
+#             ### kcs_vec
+#             joints = joints[:, :14, :]
+#             joints_tr = tf.transpose(joints, perm=[0, 2, 1])
+#             B = tf.tensordot(joints_tr, C_matrix, 1)
+#             B_tr = tf.transpose(B, perm=[0, 2, 1])
+#             kcs_long = tf.tensordot(B_tr, tf.transpose(B_tr), 1)
+#             kcs_diag = tf.matrix_diag_part(tf.transpose(kcs_long,[1,2,0,3]))
+#             kcs = tf.transpose(kcs_diag, [2, 0, 1])
+#             kcs_flattened = tf.reshape(kcs, [-1, 169])
+#
+#             # the first branch operates on the first input
+#             first = keras.Sequential()
+#             first.add(layers.Dense(100, activation=tf.nn.leaky_relu, input_shape=kcs_flattened.shape[1:]))
+#             second = keras.Sequential()
+#             joints = tf.reshape(joints, [-1, 42])
+#             second.add(layers.Dense(100, activation=tf.nn.leaky_relu, input_shape=joints.shape[1:]))
+#
+#             merged = tf.concat([first, second], 0)
+#             merged.add(layers.Dense(1, input_shape=merged.shape[1:]))
+#
+#             # the second branch opreates on the second input
+#             y = layers.Dense(64, activation="relu")(inputB)
+#             y = layers.Dense(32, activation="relu")(y)
+#             y = Dense(4, activation="relu")(y)
+#             y = Model(inputs=inputB, outputs=y)
+#
+#             # combine the output of the two branches
+#             combined = concatenate([x.output, y.output])
+#
+#             # apply a FC layer and then a regression prediction on the
+#             # combined outputs
+#             z = Dense(2, activation="relu")(combined)
+#             z = Dense(1, activation="linear")(z)
+#
+#             # our model will accept the inputs of the two branches and
+#             # then output a single value
+#             model = Model(inputs=[x.input, y.input], outputs=z)
+#
+#             critic_model = keras.Sequential()
+#             critic_model.add(layers.Dense(100, activation='relu', input_shape=kcs_flattened.shape[1:], ))
+#
+#
+#
+#             kcs_fc_out = slim.fully_connected(kcs_flattened, 100,
+#                                           activation_fn=tf.nn.leaky_relu,
+#                                           scope="kcs_fc")
+#
+#             joints = tf.reshape(joints, [-1, 42])
+#             direct_out = slim.fully_connected(joints, 100,
+#                                              activation_fn=tf.nn.leaky_relu,
+#                                              scope="direct_fc")
+#
+#             print('joints', joints)
+#             print('kcs', kcs)
+#             merged_out = tf.concat([kcs_fc_out, direct_out], 0)
+#             print('kcs_fc_out', kcs_fc_out)
+#             print('direct_out', direct_out)
+#             print('merged_out', merged_out)
+#             gan_out = slim.fully_connected(merged_out, 1,
+#                                           activation_fn=None,
+#                                           scope="wgan")
+#             # Do shape on it's own:
+#             shapes = slim.stack(
+#                shapes,
+#                slim.fully_connected, [10, 5],
+#                scope="shape_fc1")
+#             shape_out = slim.fully_connected(
+#                shapes, 1, activation_fn=None, scope="shape_final")
+#
+#             print('gan_out', gan_out)
+#             print('shape_out', shape_out)
+#             out = tf.concat([gan_out, shape_out], 1)
+#
+#             variables = tf.contrib.framework.get_variables(scope)
+#             return out, variables
 
-def Critic_network(
-        joints,
-        shapes,
-        weight_decay,
-        C_matrix,
-        batch_size
-):
+def precompute_C_matrix(num_joints=14):
+    """"
+    joints:
+    0: right foot; 1: right knee; 2: right hip; 3: left hip; 4: left knee; 5: left foot; 6: right wrist
+    7: right elbow; 8: right shoulder; 9: left shoulder; 10: left elbow; 11: left wrist; 12: neck;
+    13: head; 14-18: head/face
+
+    bones:
+    0: right shin; 1: right thigh; 2: right side; 3: left side; 4: left thigh; 5: left shin; 6: right forearm;
+    7: right upper arm; 8: right collarbone; 9: left collarbone; 10: left upper arm; 11: left forearm; 12: neck;
+    13-?: face
+    """
+
+    num_bones = num_joints - 1
+
+    # C = tf.zeros([num_joints, num_bones], tf.int32)
+    # C[1, 0] = -1
+    # C[0, 0] = 1
+    # C[2, 1] = -1
+    # C[1, 1] = 1
+    # C[8, 2] = -1
+    # C[2, 2] = 1
+    # C[9, 3] = -1
+    # C[3, 3] = 1
+    # C[3, 4] = -1
+    # C[4, 4] = 1
+    # C[4, 5] = -1
+    # C[5, 5] = 1
+    # C[7, 6] = -1
+    # C[6, 6] = 1
+    # C[8, 7] = -1
+    # C[7, 7] = 1
+    # C[12, 8] = -1
+    # C[8, 8] = 1
+    # C[12, 9] = -1
+    # C[9, 9] = 1
+    # C[9, 10] = -1
+    # C[10, 10] = 1
+    # C[10, 11] = -1
+    # C[11, 11] = 1
+    # C[13, 12] = -1
+    # C[12, 12] = 1
+
+    assert num_joints == 14, "num_joints must be 14 for now. Computation of C matrix for more joints will be implemented soon."
+
+    indices_ones = np.arange(num_bones)
+    indices_minus_ones = np.array([1, 2, 8, 9, 3, 4, 7, 8, 12, 12, 9, 10, 13])
+
+    C_np = np.zeros([num_joints, num_bones])
+    C_np[indices_ones, np.arange(num_bones)] = 1
+    C_np[indices_minus_ones, np.arange(num_bones)] = -1
+    C = tf.constant(C_np, dtype=tf.float32)
+
+    return C
+
+def get_kcs(joints, C_matrix, num_joints=14):
+    joints = joints[:, :num_joints, :]
+    joints_tr = tf.transpose(joints, perm=[0, 2, 1])
+    B = tf.tensordot(joints_tr, C_matrix, 1)
+    B_tr = tf.transpose(B, perm=[0, 2, 1])
+    kcs_long = tf.tensordot(B_tr, tf.transpose(B_tr), 1)
+    kcs_diag = tf.linalg.diag_part(tf.transpose(kcs_long, [1, 2, 0, 3]))
+    kcs = tf.transpose(kcs_diag, [2, 0, 1])
+    return kcs
+
+def Critic_network(num_joints=14):
     """
     Critic network adapted from
     "RepNet: Weakly Supervised Training of an Adversarial Reprojection Network for 3D Human Pose Estimation"
@@ -198,13 +385,11 @@ def Critic_network(
 
     Input:
     - joints: N x num_joints x 3
-    - shapes: N x 10
-    - weight_decay: float
     - C_matrix: num_joints x num_bones
+    - shapes: N x 10
 
     Outputs:
-    - prediction: N x (1+23) or N x (1+23+1) if do_joint is on.
-    - variables: tf variables
+    - prediction: N x (1 + 1); one for skeleton, one for shapes
 
        joints:
        0: right foot; 1: right knee; 2: right hip; 3: left hip; 4: left knee; 5: left foot; 6: right wrist
@@ -216,102 +401,35 @@ def Critic_network(
        7: right upper arm; 8: right collarbone; 9: left collarbone; 10: left upper arm; 11: left forearm; 12: neck;
        13-?: face
     """
-    with tf.name_scope("Critic_network", [joints, shapes]):
-        with tf.variable_scope("Critic") as scope:
-            ##############################################################
-            ### kcs_naive
-            # kcs_naive = tf.Variable(tf.zeros(shape=(1, 13, 13)), trainable=False,
-            #                         dtype=tf.float32)
-            # print('C_matrix', C_matrix)
-            # print('joints', joints)
-            #
-            # joints = joints[:,:14,:]
-            #
-            # for i in range(batch_size):
-            #     kcs_single = tf.matmul(tf.matmul(tf.transpose(C_matrix), tf.matmul(joints[i], tf.transpose(joints[i]))), C_matrix)
-            #     #kcs = tf.assign(kcs[i], tf.cast(kcs_single, tf.float32))
-            #     kcs_naive = tf.concat([kcs_naive, tf.expand_dims(kcs_single, 0)], axis=0)
-            #
-            # kcs_naive = kcs_naive[1:,:,:]
-            # kcs_flattened = tf.reshape(kcs_naive, [-1, 169])
-            #############################################################
+    if(num_joints == 14):
+        kcs_input_shape = (13, 13)
+        joints_input_shape = (14, 3)
+    elif(num_joints == 19):
+        kcs_input_shape = (18, 18)
+        joints_input_shape = (19, 3)
+    else:
+        kcs_input_shape, joints_input_shape = None
 
-            ### kcs_vec
-            joints = joints[:, :14, :]
-            joints_tr = tf.transpose(joints, perm=[0, 2, 1])
-            B = tf.tensordot(joints_tr, C_matrix, 1)
-            B_tr = tf.transpose(B, perm=[0, 2, 1])
-            kcs_long = tf.tensordot(B_tr, tf.transpose(B_tr), 1)
-            kcs_diag = tf.matrix_diag_part(tf.transpose(kcs_long,[1,2,0,3]))
-            kcs = tf.transpose(kcs_diag, [2, 0, 1])
-            kcs_flattened = tf.reshape(kcs, [-1, 169])
+    kcs_input = layers.Input(shape=kcs_input_shape)
+    kcs_out = layers.Flatten()(kcs_input)
+    kcs_out = layers.Dense(100, activation=tf.nn.leaky_relu)(kcs_out)
 
-            # the first branch operates on the first input
-            first = keras.Sequential()
-            first.add(layers.Dense(100, activation=tf.nn.leaky_relu, input_shape=kcs_flattened.shape[1:]))
-            second = keras.Sequential()
-            joints = tf.reshape(joints, [-1, 42])
-            second.add(layers.Dense(100, activation=tf.nn.leaky_relu, input_shape=joints.shape[1:]))
+    joints_input = layers.Input(shape=joints_input_shape)
+    joints_out = layers.Flatten()(joints_input)
+    joints_out = layers.Dense(100, activation=tf.nn.leaky_relu)(joints_out)
 
-            merged = tf.concat([first, second], 0)
-            merged.add(layers.Dense(1, input_shape=merged.shape[1:]))
+    critic_joints_out = tf.concat([kcs_out, joints_out], 1)
+    critic_joints_out = layers.Dense(1, input_shape=critic_joints_out.shape[1:])(critic_joints_out)
 
-            # the second branch opreates on the second input
-            y = layers.Dense(64, activation="relu")(inputB)
-            y = layers.Dense(32, activation="relu")(y)
-            y = Dense(4, activation="relu")(y)
-            y = Model(inputs=inputB, outputs=y)
+    shapes_input = layers.Input(shape=(10,))
+    shapes_out = layers.Dense(10, activation='relu')(shapes_input)
+    shapes_out = layers.Dense(5, activation='relu')(shapes_out)
+    shapes_out = layers.Dense(1)(shapes_out)
 
-            # combine the output of the two branches
-            combined = concatenate([x.output, y.output])
+    critic_out = tf.concat([critic_joints_out, shapes_out], 1)
 
-            # apply a FC layer and then a regression prediction on the
-            # combined outputs
-            z = Dense(2, activation="relu")(combined)
-            z = Dense(1, activation="linear")(z)
-
-            # our model will accept the inputs of the two branches and
-            # then output a single value
-            model = Model(inputs=[x.input, y.input], outputs=z)
-
-            critic_model = keras.Sequential()
-            critic_model.add(layers.Dense(100, activation='relu', input_shape=kcs_flattened.shape[1:], ))
-
-
-
-            kcs_fc_out = slim.fully_connected(kcs_flattened, 100,
-                                          activation_fn=tf.nn.leaky_relu,
-                                          scope="kcs_fc")
-
-            joints = tf.reshape(joints, [-1, 42])
-            direct_out = slim.fully_connected(joints, 100,
-                                             activation_fn=tf.nn.leaky_relu,
-                                             scope="direct_fc")
-
-            print('joints', joints)
-            print('kcs', kcs)
-            merged_out = tf.concat([kcs_fc_out, direct_out], 0)
-            print('kcs_fc_out', kcs_fc_out)
-            print('direct_out', direct_out)
-            print('merged_out', merged_out)
-            gan_out = slim.fully_connected(merged_out, 1,
-                                          activation_fn=None,
-                                          scope="wgan")
-            # Do shape on it's own:
-            shapes = slim.stack(
-               shapes,
-               slim.fully_connected, [10, 5],
-               scope="shape_fc1")
-            shape_out = slim.fully_connected(
-               shapes, 1, activation_fn=None, scope="shape_final")
-
-
-            print('gan_out', gan_out)
-            print('shape_out', shape_out)
-            out = tf.concat([gan_out, shape_out], 1)
-
-            variables = tf.contrib.framework.get_variables(scope)
-            return out, variables
+    model = keras.models.Model(inputs=[kcs_input, joints_input, shapes_input], outputs=critic_out)
+    return model
 
 ###########################################
 # batch_size = 2
@@ -385,67 +503,67 @@ def Critic_network(
 #     ax.set_zlim([-1, 4])
 #     plt.show()
 ###########################################
-
-def Discriminator_separable_rotations(
-        poses,
-        shapes,
-        weight_decay,
-):
-    """
-    23 Discriminators on each joint + 1 for all joints + 1 for shape.
-    To share the params on rotations, this treats the 23 rotation matrices
-    as a "vertical image":
-    Do 1x1 conv, then send off to 23 independent classifiers.
-
-    Input:
-    - poses: N x 23 x 1 x 9, NHWC ALWAYS!!
-    - shapes: N x 10
-    - weight_decay: float
-
-    Outputs:
-    - prediction: N x (1+23) or N x (1+23+1) if do_joint is on.
-    - variables: tf variables
-    """
-    data_format = "NHWC"
-    with tf.name_scope("Discriminator_sep_rotations", [poses, shapes]):
-        with tf.variable_scope("D") as scope:
-            with slim.arg_scope(
-                [slim.conv2d, slim.fully_connected],
-                    weights_regularizer=slim.l2_regularizer(weight_decay)):
-                with slim.arg_scope([slim.conv2d], data_format=data_format):
-                    poses = slim.conv2d(poses, 32, [1, 1], scope='D_conv1')
-                    poses = slim.conv2d(poses, 32, [1, 1], scope='D_conv2')
-                    theta_out = []
-                    for i in range(0, 23):
-                        theta_out.append(
-                            slim.fully_connected(
-                                poses[:, i, :, :],
-                                1,
-                                activation_fn=None,
-                                scope="pose_out_j%d" % i))
-                    theta_out_all = tf.squeeze(tf.stack(theta_out, axis=1))
-
-                    # Do shape on it's own:
-                    shapes = slim.stack(
-                        shapes,
-                        slim.fully_connected, [10, 5],
-                        scope="shape_fc1")
-                    shape_out = slim.fully_connected(
-                        shapes, 1, activation_fn=None, scope="shape_final")
-                    """ Compute joint correlation prior!"""
-                    nz_feat = 1024
-                    poses_all = slim.flatten(poses, scope='vectorize')
-                    poses_all = slim.fully_connected(
-                        poses_all, nz_feat, scope="D_alljoints_fc1")
-                    poses_all = slim.fully_connected(
-                        poses_all, nz_feat, scope="D_alljoints_fc2")
-                    poses_all_out = slim.fully_connected(
-                        poses_all,
-                        1,
-                        activation_fn=None,
-                        scope="D_alljoints_out")
-                    out = tf.concat([theta_out_all,
-                                     poses_all_out, shape_out], 1)
-
-            variables = tf.contrib.framework.get_variables(scope)
-            return out, variables
+#
+# def Discriminator_separable_rotations(
+#         poses,
+#         shapes,
+#         weight_decay,
+# ):
+#     """
+#     23 Discriminators on each joint + 1 for all joints + 1 for shape.
+#     To share the params on rotations, this treats the 23 rotation matrices
+#     as a "vertical image":
+#     Do 1x1 conv, then send off to 23 independent classifiers.
+#
+#     Input:
+#     - poses: N x 23 x 1 x 9, NHWC ALWAYS!!
+#     - shapes: N x 10
+#     - weight_decay: float
+#
+#     Outputs:
+#     - prediction: N x (1+23) or N x (1+23+1) if do_joint is on.
+#     - variables: tf variables
+#     """
+#     data_format = "NHWC"
+#     with tf.name_scope("Discriminator_sep_rotations", [poses, shapes]):
+#         with tf.variable_scope("D") as scope:
+#             with slim.arg_scope(
+#                 [slim.conv2d, slim.fully_connected],
+#                     weights_regularizer=slim.l2_regularizer(weight_decay)):
+#                 with slim.arg_scope([slim.conv2d], data_format=data_format):
+#                     poses = slim.conv2d(poses, 32, [1, 1], scope='D_conv1')
+#                     poses = slim.conv2d(poses, 32, [1, 1], scope='D_conv2')
+#                     theta_out = []
+#                     for i in range(0, 23):
+#                         theta_out.append(
+#                             slim.fully_connected(
+#                                 poses[:, i, :, :],
+#                                 1,
+#                                 activation_fn=None,
+#                                 scope="pose_out_j%d" % i))
+#                     theta_out_all = tf.squeeze(tf.stack(theta_out, axis=1))
+#
+#                     # Do shape on it's own:
+#                     shapes = slim.stack(
+#                         shapes,
+#                         slim.fully_connected, [10, 5],
+#                         scope="shape_fc1")
+#                     shape_out = slim.fully_connected(
+#                         shapes, 1, activation_fn=None, scope="shape_final")
+#                     """ Compute joint correlation prior!"""
+#                     nz_feat = 1024
+#                     poses_all = slim.flatten(poses, scope='vectorize')
+#                     poses_all = slim.fully_connected(
+#                         poses_all, nz_feat, scope="D_alljoints_fc1")
+#                     poses_all = slim.fully_connected(
+#                         poses_all, nz_feat, scope="D_alljoints_fc2")
+#                     poses_all_out = slim.fully_connected(
+#                         poses_all,
+#                         1,
+#                         activation_fn=None,
+#                         scope="D_alljoints_out")
+#                     out = tf.concat([theta_out_all,
+#                                      poses_all_out, shape_out], 1)
+#
+#             variables = tf.contrib.framework.get_variables(scope)
+#             return out, variables
