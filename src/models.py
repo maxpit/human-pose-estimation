@@ -312,6 +312,7 @@ def precompute_C_matrix():
 #             return out, variables
 
 def precompute_C_matrix(num_joints=14):
+    # TODO: Check whether LSP order = our order !!!
     """"
     joints:
     0: right foot; 1: right knee; 2: right hip; 3: left hip; 4: left knee; 5: left foot; 6: right wrist
@@ -377,6 +378,7 @@ def get_kcs(joints, C_matrix, num_joints=14):
     return kcs
 
 def Critic_network(num_joints=14):
+    # TODO: Check whether LSP order = our order !!!
     """
     Critic network adapted from
     "RepNet: Weakly Supervised Training of an Adversarial Reprojection Network for 3D Human Pose Estimation"

@@ -58,7 +58,7 @@ flags.DEFINE_string(
 DATA_DIR = '/home/valentin/Code/ADL/human-pose-estimation/datasets'
 
 flags.DEFINE_string('data_dir', DATA_DIR, 'Where to save training models')
-flags.DEFINE_string('log_dir', 'logs', 'Where to save training models')
+flags.DEFINE_string('logs', 'logs', 'Where to save training models')
 flags.DEFINE_string('model_dir', None, 'Where model will be saved -- filled automatically')
 flags.DEFINE_integer('validation_step_size', 500, 'How often to visualize img during training')
 flags.DEFINE_integer('log_img_step', 500, 'How often to visualize img during training')
@@ -225,9 +225,9 @@ def prepare_dirs(config, prefix=['HMR']):
         time_str = datetime.now().strftime("%b%d_%H%M")
 
         save_name = "%s_%s_%s" % (prefix, postfix, time_str)
-        config.model_dir = osp.join(config.log_dir, save_name)
+        config.model_dir = osp.join(config.logs, save_name)
 
-    for path in [config.log_dir + "_train", config.log_dir + "_val", config.model_dir]:
+    for path in [config.logs + "_train", config.logs + "_val", config.model_dir]:
         if not osp.exists(path):
             print('making %s' % path)
             makedirs(path)

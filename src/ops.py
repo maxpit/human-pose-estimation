@@ -11,20 +11,22 @@ from sklearn.neighbors import NearestNeighbors
 import numpy as np
 
 
-def keypoint_l1_loss(kp_gt, kp_pred, scale=1., name=None):
+def keypoint_l1_loss(kp_gt, kp_pred, scale=1., name="kp_l1_loss"):
     """
     computes: \Sum_i [0.5 * vis[i] * |kp_gt[i] - kp_pred[i]|] / (|vis|)
     Inputs:
       kp_gt  : N x K x 3
       kp_pred: N x K x 2
     """
-    with tf.name_scope(name, "keypoint_l1_loss", [kp_gt, kp_pred]):
+    with tf.name_scope(name):
         kp_gt = tf.reshape(kp_gt, (-1, 3))
         kp_pred = tf.reshape(kp_pred, (-1, 2))
 
         vis = tf.expand_dims(tf.cast(kp_gt[:, 2], tf.float32), 1)
-        print(kp_gt[:,2], kp_pred, vis)
-        res = tf.losses.absolute_difference(kp_gt[:, :2], kp_pred, weights=vis)
+        #print("kp_gt, kp_pred: ", kp_gt[:,2], kp_pred, vis)
+        #res = tf.losses.absolute_difference(kp_gt[:, :2], kp_pred, weights=vis)
+        res = tf.compat.v1.losses.absolute_difference(kp_gt[:, :2], kp_pred, weights=vis)
+        #TODO: ...losses.absolute_difference Deprecated. Replace with tf2.0 fuction --> see warning.
         return res
 
 
@@ -52,7 +54,7 @@ def compute_3d_loss(params_pred, params_gt, has_gt3d):
 
 def align_by_pelvis(joints):
     """
-    Assumes joints is N x 14 x 3 in LSP order.
+    Assumes joints is N x 14 x 3 in LSP order. #TODO: Check whether LSP order = our order !!!
     Then hips are: [3, 2]
     Takes mid point of these points, then subtracts it.
     """
@@ -189,3 +191,16 @@ def mesh_reprojection_loss(silhouette_gt, silhouette_pred, batch_size, name=None
                                              tf.gather_nd(silhouette_gt,
                                                           tf.where(tf.equal(silhouette_gt[:, 0], 0)))[:, 1]
                                              ], axis=1), silhouette_pred[0, :, :]
+
+##################
+### Test functions
+# N = 10
+# num_keypoints = 19
+#
+# keypoints_gt = np.random.rand(N, num_keypoints, 3)
+# keypoints_pred = np.random.rand(N, num_keypoints, 2)
+#
+# print("loss: ")
+# loss = keypoint_l1_loss(keypoints_gt, keypoints_pred, name="test")
+#
+# print("loss.shape: ", loss)
