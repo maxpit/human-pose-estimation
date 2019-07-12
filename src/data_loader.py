@@ -129,7 +129,8 @@ class DataLoader(object):
         return joints, shape
 
     def read_data(self, filenames):
-        with tf.name_scope(None, 'read_data', filenames):
+        print(filenames)
+        with tf.name_scope('read_data'):
             dataset = tf.data.TFRecordDataset(filenames)
 
             dataset = dataset.map(data_utils.parse_example_proto)
@@ -157,9 +158,8 @@ class DataLoader(object):
         print("gt3d:",gt3d)
         print(" - ")
 
-        margin = tf.to_int32(self.output_size / 2)
-        with tf.name_scope(None, 'image_preprocessing',
-                           [image, seg_gt, image_size, label, center]):
+        margin = tf.cast(self.output_size / 2, tf.int32)
+        with tf.name_scope('image_preprocessing'):
             visibility = label[2, :]
             keypoints = label[:2, :]
 
@@ -181,7 +181,7 @@ class DataLoader(object):
             print("padded img and seg", seg_gt_pad)
 
             center_pad = center + margin_safe
-            keypoints_pad = keypoints + tf.to_float(margin_safe)
+            keypoints_pad = keypoints + tf.cast(margin_safe, tf.float32)
 
             start_pt = center_pad - margin
 
@@ -193,8 +193,8 @@ class DataLoader(object):
 
             crop = tf.slice(image_pad, bbox_begin, bbox_size)
             crop_gt = tf.slice(seg_gt_pad, bbox_begin, bbox_size_gt)
-            x_crop = keypoints_pad[0, :] - tf.to_float(start_pt[0])
-            y_crop = keypoints_pad[1, :] - tf.to_float(start_pt[1])
+            x_crop = keypoints_pad[0, :] - tf.cast(start_pt[0], tf.float32)
+            y_crop = keypoints_pad[1, :] - tf.cast(start_pt[1], tf.float32)
 
             crop_kp = tf.stack([x_crop, y_crop, visibility])
 

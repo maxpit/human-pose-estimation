@@ -30,16 +30,16 @@ def parse_example_proto(example_serialized, has_3d=False):
         'mosh/gt3d'          : float_feature(shape.astype(np.float)),
     """
     feature_map = {
-        'image/encoded': tf.FixedLenFeature([], tf.string),
-        'image/seg_gt':  tf.FixedLenFeature([], tf.string),
-        'image/height':  tf.FixedLenFeature([], tf.int64),
-        'image/width':   tf.FixedLenFeature([], tf.int64),
-        'image/filename': tf.FixedLenFeature([], tf.string),
-        'image/center': tf.FixedLenFeature((2, 1), dtype=tf.int64),
-        'image/visibility': tf.FixedLenFeature((1, 14), dtype=tf.int64),
-        'image/x': tf.FixedLenFeature((1, 14), dtype=tf.float32),
-        'image/y': tf.FixedLenFeature((1, 14), dtype=tf.float32),
-        'image/face_pts': tf.FixedLenFeature(
+        'image/encoded': tf.io.FixedLenFeature([], tf.string),
+        'image/seg_gt':  tf.io.FixedLenFeature([], tf.string),
+        'image/height':  tf.io.FixedLenFeature([], tf.int64),
+        'image/width':   tf.io.FixedLenFeature([], tf.int64),
+        'image/filename': tf.io.FixedLenFeature([], tf.string),
+        'image/center': tf.io.FixedLenFeature((2, 1), dtype=tf.int64),
+        'image/visibility': tf.io.FixedLenFeature((1, 14), dtype=tf.int64),
+        'image/x': tf.io.FixedLenFeature((1, 14), dtype=tf.float32),
+        'image/y': tf.io.FixedLenFeature((1, 14), dtype=tf.float32),
+        'image/face_pts': tf.io.FixedLenFeature(
             (1, 15),
             dtype=tf.float32,
             default_value=[
@@ -49,17 +49,17 @@ def parse_example_proto(example_serialized, has_3d=False):
     if has_3d:
         feature_map.update({
             'mosh/pose':
-            tf.FixedLenFeature((72, ), dtype=tf.float32),
+            tf.io.FixedLenFeature((72, ), dtype=tf.float32),
             'mosh/shape':
-            tf.FixedLenFeature((10, ), dtype=tf.float32),
+            tf.io.FixedLenFeature((10, ), dtype=tf.float32),
             'mosh/gt3d':
-            tf.FixedLenFeature((14 * 3, ), dtype=tf.float32),
+            tf.io.FixedLenFeature((14 * 3, ), dtype=tf.float32),
             # has_3d is for pose and shape: 0 for mpi_inf_3dhp, 1 for h3.6m.
             'meta/has_3d':
-            tf.FixedLenFeature((1), dtype=tf.int64, default_value=[0]),
+            tf.io.FixedLenFeature((1), dtype=tf.int64, default_value=[0]),
         })
 
-    features = tf.parse_single_example(example_serialized, feature_map)
+    features = tf.io.parse_single_example(example_serialized, feature_map)
 
     height = tf.cast(features['image/height'], tf.int32)
     width = tf.cast(features['image/width'], tf.int32)
@@ -152,14 +152,14 @@ def parse_mocap_example(example_serialized):
         'pose'  : 72-D float
         'shape' : 10-D float
     """
-    with tf.name_scope(None, 'read_smpl_data', example_serialized):
+    with tf.name_scope('read_smpl_data'):
 
         feature_map = {
-            'pose': tf.FixedLenFeature((72, ), dtype=tf.float32),
-            'shape': tf.FixedLenFeature((10, ), dtype=tf.float32)
+            'pose': tf.io.FixedLenFeature((72, ), dtype=tf.float32),
+            'shape': tf.io.FixedLenFeature((10, ), dtype=tf.float32)
         }
 
-        features = tf.parse_single_example(example_serialized, feature_map)
+        features = tf.io.parse_single_example(example_serialized, feature_map)
         pose = tf.cast(features['pose'], dtype=tf.float32)
         shape = tf.cast(features['shape'], dtype=tf.float32)
 
@@ -173,7 +173,7 @@ def decode_jpeg(image_buffer, ch,  name=None):
       Returns:
         3-D float Tensor with values ranging from [0, 1).
     """
-    with tf.name_scope(name, 'decode_jpeg', [image_buffer]):
+    with tf.name_scope('decode_jpeg'):
         # Decode the string as an RGB JPEG.
         # Note that the resulting image contains an unknown height and width
         # that is set dynamically by decode_jpeg. In other words, the height
@@ -186,27 +186,27 @@ def decode_jpeg(image_buffer, ch,  name=None):
 
 
 def jitter_center(center, trans_max):
-    with tf.name_scope(None, 'jitter_center', [center, trans_max]):
-        rand_trans = tf.random_uniform(
+    with tf.name_scope('jitter_center'):
+        rand_trans = tf.random.uniform(
             [2, 1], minval=-trans_max, maxval=trans_max, dtype=tf.int32)
         return center + rand_trans
 
 
 def jitter_scale(image, seg_gt, image_size, keypoints, center, scale_range):
 
-    with tf.name_scope(None, 'jitter_scale', [image, image_size, keypoints]):
-        scale_factor = tf.random_uniform(
+    with tf.name_scope('jitter_scale'):
+        scale_factor = tf.random.uniform(
             [1],
             minval=scale_range[0],
             maxval=scale_range[1],
             dtype=tf.float32)
-        new_size = tf.to_int32(tf.to_float(image_size) * scale_factor)
-        new_image = tf.image.resize_images(image, new_size)
-        new_seg_gt = tf.image.resize_images(seg_gt, new_size)
+        new_size = tf.cast(tf.cast(image_size, tf.float32) * scale_factor,
+                           tf.int32)
+        new_image = tf.image.resize(image, new_size)
+        new_seg_gt = tf.image.resize(seg_gt, new_size)
 
         # This is [height, width] -> [y, x] -> [col, row]
-        actual_factor = tf.to_float(
-            tf.shape(new_image)[:2]) / tf.to_float(image_size)
+        actual_factor = tf.cast(tf.shape(new_image)[:2], tf.float32) / tf.cast(image_size, tf.float32)
         x = keypoints[0, :] * actual_factor[1]
         y = keypoints[1, :] * actual_factor[0]
 
@@ -231,12 +231,12 @@ def pad_image_edge(image, margin):
     def repeat_col(col, num_repeat):
         # col is N x 3, ravels
         # i.e. to N*3 and repeats, then put it back to num_repeat x N x 3
-        with tf.name_scope(None, 'repeat_col', [col, num_repeat]):
+        with tf.name_scope('repeat_col'):
             return tf.reshape(
                 tf.tile(tf.reshape(col, [-1]), [num_repeat]),
                 [num_repeat, -1, num_channels])
 
-    with tf.name_scope(None, 'pad_image_edge', [image, margin]):
+    with tf.name_scope('pad_image_edge'):
         top = repeat_col(image[0, :, :], margin)
         bottom = repeat_col(image[-1, :, :], margin)
 
@@ -255,7 +255,7 @@ def random_flip(image, seg_gt, kp, pose=None, gt3d=None):
     mirrors image L/R and kp, also pose if supplied
     """
 
-    uniform_random = tf.random_uniform([], 0, 1.0)
+    uniform_random = tf.random.uniform([], 0, 1.0)
     mirror_cond = tf.less(uniform_random, .5)
 
     if pose is not None and gt3d is not None:
@@ -301,7 +301,7 @@ def reflect_pose(pose):
     Input is a 72-Dim vector.
     Global rotation (first 3) is left alone.
     """
-    with tf.name_scope("reflect_pose", [pose]):
+    with tf.name_scope("reflect_pose"):
         """
         # How I got the indices:
         right = [11, 8, 5, 2, 14, 17, 19, 21, 23]
@@ -349,7 +349,7 @@ def reflect_joints3d(joints):
     Assumes input is 14 x 3 (the LSP skeleton subset of H3.6M)
     """
     swap_inds = tf.constant([5, 4, 3, 2, 1, 0, 11, 10, 9, 8, 7, 6, 12, 13])
-    with tf.name_scope("reflect_joints3d", [joints]):
+    with tf.name_scope("reflect_joints3d"):
         joints_ref = tf.gather(joints, swap_inds)
         flip_mat = tf.constant([[-1, 0, 0], [0, 1, 0], [0, 0, 1]], tf.float32)
         joints_ref = tf.transpose(
