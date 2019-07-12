@@ -11,8 +11,7 @@ from __future__ import print_function
 from .data_loader import num_examples
 
 from .ops import keypoint_l1_loss, compute_3d_loss, align_by_pelvis, mesh_reprojection_loss
-from .models import Critic_network, get_encoder_fn_separate,
-precompute_C_matrix, get_kcs
+from .models import Critic_network, get_encoder_fn_separate, precompute_C_matrix, get_kcs
 
 from .tf_smpl.batch_lbs import batch_rodrigues
 from .tf_smpl.batch_smpl import SMPL
