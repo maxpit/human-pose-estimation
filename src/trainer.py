@@ -541,8 +541,10 @@ class HMRTrainer(object):
                 self.silhouette_pred = silhouette_pred
                 self.silhouette_gt = silhouette_gt
 
-                repro_loss, ba_dist, ab_dist, self.sil_pts_gt, self.sil_pts_pred = self.mesh_repro_loss(
-                    silhouette_gt, silhouette_pred, self.batch_size, name='mesh_repro_loss' % i)
+                # repro_loss, ba_dist, ab_dist, self.sil_pts_gt, self.sil_pts_pred = self.mesh_repro_loss(
+                #     silhouette_gt, silhouette_pred, self.batch_size, name='mesh_repro_loss' % i)
+                repro_loss = self.mesh_repro_loss(
+                     silhouette_gt, silhouette_pred, self.batch_size, name='mesh_repro_loss' % i)
                 repro_loss_scaled = repro_loss * self.mr_loss_weight
 
                 loss_mr.append(repro_loss_scaled)
