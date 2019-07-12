@@ -116,8 +116,8 @@ def bidirectional_dist(A, B):
     #print(A_np)
     #print(B_np)
     #B_const = tf.constant(B)
-    print("A: ", A)
-    print("B: ", B)
+    #print("A: ", A)
+    #print("B: ", B)
 
     #with tf.Session() as sess:
     #tf.initialize_all_variables().run()
@@ -134,12 +134,12 @@ def bidirectional_dist(A, B):
     #                          algorithm='ball_tree').fit(sess.run(B))
     #distances_AB, ind_AB = nbrs_A.kneighbors(sess.run(A))
     #ind_AB, ind_BA = find_nearest_neighbors_naive(A, B)
-    ind_AB, ind_BA = find_nearest_neighbors_advanced(tf.cast(A, dtype=tf.float32), B)
+    ind_AB, ind_BA = find_nearest_neighbors_advanced(A, B) #tf.cast(A, dtype=tf.float32), B)
 
     # compute distances
-    dist_BA = tf.norm(tf.to_float(B) - tf.to_float(tf.gather(A, ind_BA)), axis=1)
+    dist_BA = tf.norm(B - tf.gather(A, ind_BA), axis=1)
     #dist_AB = tf.norm(tf.to_float(A) - tf.to_float(tf.gather(B, ind_AB)), axis=1)
-    dist_AB = tf.reduce_sum(tf.abs(tf.to_float(A) - tf.to_float(tf.gather(B, ind_AB))))
+    dist_AB = tf.reduce_sum(tf.abs(A - tf.gather(B, ind_AB)))
     summed_dist_BA = tf.reduce_sum(dist_BA)
     summed_dist_AB = tf.reduce_sum(dist_AB)
     # print(distances_BA.sum()+distances_AB.sum())
@@ -148,28 +148,26 @@ def bidirectional_dist(A, B):
     return tf.math.add(summed_dist_BA, summed_dist_AB), summed_dist_BA, summed_dist_AB
 
 
-def mesh_reprojection_loss(silhouette_gt, silhouette_pred, batch_size, name=None):
+def mesh_reprojection_loss(silhouette_gt, silhouette_pred, batch_size, name="mesh_reprojection_loss"):
     """
     ADL4CV
     Computes bidirectional distance between ground truth silhouette and predicted silhouette
     Inputs:
         silhouette_gt:      ### N x P (num pixels of silhouette) x 2 -->   try with N*P x 3
         silhouette_pred:    N x 6890 (num vertices) x 2
-
-
     """
-    with tf.name_scope(name, "mesh_reprojection_loss", [silhouette_gt, silhouette_pred]):
+    with tf.name_scope(name):
         #K = silhouette_gt.shape[1]
       #  silhouette_gt = tf.reshape(silhouette_gt, (-1, 2))
       #  silhouette_pred = tf.reshape(silhouette_pred, (-1, 2))
       #  sil_gt_np = silhouette_gt.eval()
       #  sil_pred_np = silhouette_pred.eval()
-        print("silhouette_gt!!!!!!!!!!!!!!!", silhouette_gt)
+        #print("silhouette_gt!!!!!!!!!!!!!!!", silhouette_gt)
         #if(batch_size==1):
             #loss = bidirectional_dist(tf.gather_nd(silhouette_gt,
              #                                       tf.where(tf.equal(silhouette_gt[:,0], 0)))[:, 1:], silhouette_pred[0,:,:])
         #else:
-        loss = tf.Variable(0., name="mesh_reprojection_loss", trainable=False) # variable?
+        loss = tf.Variable(0, name="mesh_reprojection_loss", trainable=False, dtype=tf.float64) # variable?
         ab_all = tf.Variable(0., trainable=False) # variable?
         ba_all = tf.Variable(0., trainable=False) # variable?
         for i in range(batch_size):
@@ -181,26 +179,32 @@ def mesh_reprojection_loss(silhouette_gt, silhouette_pred, batch_size, name=None
 
             bi_loss, ba, ab = bidirectional_dist(silhouette_points_gt,
                                silhouette_pred[i, :, :])
-            bi_loss_scaled = bi_loss/(silhouette_gt.shape.as_list()[1] +
-                                      silhouette_pred.shape.as_list()[1])
-            loss = tf.math.add(loss, bi_loss_scaled)
-            ab_all = tf.math.add(ab_all, ab)
-            ba_all = tf.math.add(ba_all, ba)
-        return loss, ab_all, ba_all, tf.stack([tf.gather_nd(silhouette_gt,
-                                            tf.where(tf.equal(silhouette_gt[:, 0], 0)))[:, 2],
-                                             tf.gather_nd(silhouette_gt,
-                                                          tf.where(tf.equal(silhouette_gt[:, 0], 0)))[:, 1]
-                                             ], axis=1), silhouette_pred[0, :, :]
+            bi_loss_scaled = bi_loss/(silhouette_gt.shape[1] +
+                                      silhouette_pred.shape[1])
+            loss = tf.add(loss, bi_loss_scaled)
+            #ab_all = tf.math.add(ab_all, ab)
+            #ba_all = tf.math.add(ba_all, ba)
+        return loss#, ab_all, ba_all, tf.stack([tf.gather_nd(silhouette_gt,
+                    #                        tf.where(tf.equal(silhouette_gt[:, 0], 0)))[:, 2],
+                     #                        tf.gather_nd(silhouette_gt,
+                      #                                    tf.where(tf.equal(silhouette_gt[:, 0], 0)))[:, 1]
+                       #                      ], axis=1), silhouette_pred[0, :, :]
 
 ##################
 ### Test functions
+##################
 # N = 10
 # num_keypoints = 19
+# random_nr = 20
+# num_vertices = 6890
 #
-# keypoints_gt = np.random.rand(N, num_keypoints, 3)
-# keypoints_pred = np.random.rand(N, num_keypoints, 2)
+# keypoints_gt = np.random.rand(N*num_keypoints, 3)
+# for i in range(N*num_keypoints):
+#     keypoints_gt[i, 0] = i%random_nr
+#
+# keypoints_pred = np.random.rand(N, num_vertices, 2)
 #
 # print("loss: ")
-# loss = keypoint_l1_loss(keypoints_gt, keypoints_pred, name="test")
+# loss = mesh_reprojection_loss(keypoints_gt, keypoints_pred, N)
 #
 # print("loss.shape: ", loss)
