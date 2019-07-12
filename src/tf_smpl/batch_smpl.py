@@ -37,7 +37,7 @@ class SMPL(object):
             dtype=dtype,
             trainable=False)
         # Size of mesh [Number of vertices, 3]
-        self.size = [self.v_template.shape[0].value, 3]
+        self.size = [self.v_template.shape[0], 3]
         self.num_betas = dd['shapedirs'].shape[-1]
         # Shape blend shape basis: 6980 x 3 x 10
         # reshaped to 6980*30 x 10, transposed to 10x6980*3
@@ -102,8 +102,8 @@ class SMPL(object):
           - Verts: N x 6980 x 3
         """
 
-        with tf.name_scope(name, "smpl_main", [beta, theta]):
-            num_batch = beta.shape[0].value
+        with tf.name_scope("smpl_main"):
+            num_batch = beta.shape[0]
 
             # 1. Add shape blend shapes
             # (N x 10) x (10 x 6890*3) = N x 6890 x 3
