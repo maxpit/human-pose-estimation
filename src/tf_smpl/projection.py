@@ -17,11 +17,11 @@ def batch_orth_proj_idrot(X, camera, name=None):
     camera is N x 3
     same as applying orth_proj_idrot to each N 
     """
-    with tf.name_scope(name, "batch_orth_proj_idrot", [X, camera]):
+    with tf.name_scope("batch_orth_proj_idrot"): 
         # TODO check X dim size.
         # tf.Assert(X.shape[2] == 3, [X])
-        print("camera: ", camera)
-        print("X: ", X)
+#        print("camera: ", camera)
+#        print("X: ", X)
 
         camera = tf.reshape(camera, [-1, 1, 3], name="cam_adj_shape")
 
@@ -39,7 +39,7 @@ def reproject_vertices(verts, cam, im_size, name=None):
     :returns:
         verts_im:   N x 6890 x 2
     """
-    with tf.name_scope(name, "mesh_reproject", [verts, cam, im_size]):
+    with tf.name_scope("mesh_reproject"):
         print("VERTS!!!!!!:",verts)
         print("CAM!!!!!!!!:",cam)
         verts_reprojected = batch_orth_proj_idrot(verts, cam)
