@@ -24,7 +24,7 @@ import numpy as np
 import math
 
 
-def Encoder_resnet(x, is_training=True, weight_decay=0.001, reuse=False):
+def Encoder_resnet(is_training=True, weight_decay=0.001, reuse=False):
     """
     Resnet v2-50
     Assumes input is [batch, height_in, width_in, channels]!!
@@ -40,7 +40,7 @@ def Encoder_resnet(x, is_training=True, weight_decay=0.001, reuse=False):
     - variables: tf variables
     """
     import tensorflow.keras.applications as apps
-    with tf.name_scope("Encoder_resnet", [x]):
+    with tf.name_scope("Encoder_resnet"):
         resnet = apps.ResNet50(include_top=False, weights='imagenet', pooling='avg')
         #resnet.trainable = is_training
     return resnet
@@ -56,7 +56,7 @@ def Encoder_resnet(x, is_training=True, weight_decay=0.001, reuse=False):
     # return net, variables
 
 
-def Encoder_fc3_dropout(x,
+def Encoder_fc3_dropout(
                         num_output=85,
                         is_training=True,
                         reuse=False,
@@ -76,11 +76,9 @@ def Encoder_fc3_dropout(x,
           86: (f, tx, ty, tz) + 24*3 + 10, or 110 for factored axis-angle.
     - variables: tf variables
     """
-    if reuse:
-        print('Reuse is on!')
-    with tf.variable_scope(name, reuse=reuse) as scope:
+    with tf.name_scope(name) as scope:
         model = keras.Sequential()
-        model.add(layers.Dense(1024, activation='relu', input_shape=x.shape[1:]))
+        model.add(layers.Dense(1024, activation='relu')) 
         model.add(layers.Dropout(0.5))
         model.add(layers.Dense(1024, activation='relu'))
         model.add(layers.Dropout(0.5))

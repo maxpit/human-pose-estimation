@@ -30,6 +30,40 @@ def keypoint_l1_loss(kp_gt, kp_pred, scale=1., name="kp_l1_loss"):
         return res
 
 
+#TODO this belongs in ops.py?
+def get_3d_loss(self, Rs, shape, joints):
+    """
+    Rs is N x 24 x 3*3 rotation matrices of pose
+    Shape is N x 10
+    joints is N x 19 x 3 joints
+
+    Ground truth:
+    self.poseshape_loader is a long vector of:
+       relative rotation (24*9)
+       shape (10)
+       3D joints (14*3)
+    """
+    Rs = tf.reshape(Rs, [self.batch_size, -1])
+    params_pred = tf.concat([Rs, shape], 1, name="prep_params_pred")
+    # 24*9+10 = 226
+    gt_params = self.poseshape_loader[:, :226]
+    loss_poseshape = self.e_3d_weight * compute_3d_loss(
+        params_pred, gt_params, self.has_gt3d_smpl)
+    # 14*3 = 42
+    gt_joints = self.poseshape_loader[:, 226:]
+    pred_joints = joints[:, :14, :]
+    # Align the joints by pelvis.
+    pred_joints = align_by_pelvis(pred_joints)
+    pred_joints = tf.reshape(pred_joints, [self.batch_size, -1])
+    gt_joints = tf.reshape(gt_joints, [self.batch_size, 14, 3])
+    gt_joints = align_by_pelvis(gt_joints)
+    gt_joints = tf.reshape(gt_joints, [self.batch_size, -1])
+
+    loss_joints = self.e_3d_weight * compute_3d_loss(
+        pred_joints, gt_joints, self.has_gt3d_joints)
+
+    return loss_poseshape, loss_joints
+
 def compute_3d_loss(params_pred, params_gt, has_gt3d):
     """
     Computes the l2 loss between 3D params pred and gt for those data that has_gt3d is True.
