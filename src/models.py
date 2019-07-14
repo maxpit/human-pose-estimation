@@ -56,7 +56,7 @@ def Encoder_resnet(is_training=True, weight_decay=0.001, reuse=False):
     # return net, variables
 
 
-def Encoder_fc3_dropout(
+def Encoder_fc3_dropout(num_input=2133,
                         num_output=85,
                         is_training=True,
                         reuse=False,
@@ -78,7 +78,7 @@ def Encoder_fc3_dropout(
     """
     with tf.name_scope(name) as scope:
         model = keras.Sequential()
-        model.add(layers.Dense(1024, activation='relu')) 
+        model.add(layers.Dense(1024, activation='relu', input_shape=(num_input,)))
         model.add(layers.Dropout(0.5))
         model.add(layers.Dense(1024, activation='relu'))
         model.add(layers.Dropout(0.5))

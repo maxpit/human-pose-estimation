@@ -176,7 +176,8 @@ class HMRTrainer(object):
             critic_dataset = mocap_dataset.shuffle(buffer_size=1000).repeat()
             critic_dataset = critic_dataset.batch(self.batch_size*3)
             self.full_dataset.append(critic_dataset)
-
+        else:
+            self.full_dataset.append(tf.data.Dataset.range(1))
         # create one dataset so its easier to iterate over it
         self.full_dataset = tf.data.Dataset.zip(tuple(self.full_dataset))
 
@@ -239,7 +240,7 @@ class HMRTrainer(object):
 
     # Notice the use of `tf.function`
     # This annotation causes the function to be "compiled".
-#@tf.function
+    @tf.function
     def train_step(self, images, seg_gts, kp2d_gts, joint3d_gt, shape_gts, step):
 
         #############################################################################################
@@ -267,17 +268,17 @@ class HMRTrainer(object):
 
             with tf.GradientTape() as gen_tape:
                 #Extract feature vector from image using resnet
-                extracted_features = self.image_feature_extractor(small_images, training=True)
+                extracted_features = self.image_feature_extractor(small_images, training=False)
 
                 theta_prev = self.load_mean_param()
                 # Main IEF loop
                 for i in np.arange(self.num_stage):
                     print('iteration', i)
                     state = tf.concat([extracted_features, theta_prev], 1)
-
+                    print(state.shape)
                     #TODO how do i get reuse=true for this?
-                    if i == 0:
-                        delta_theta = self.generator3d(state, training=True)
+                    if i != 2:
+                        delta_theta = self.generator3d(state, training=False)
                     else:
                         delta_theta = self.generator3d(state, training=True)#, reuse=True)
 
@@ -349,12 +350,12 @@ class HMRTrainer(object):
 
 
                     # Save things for visualiations:
-#                    self.all_verts.append(tf.gather(verts, self.show_these))
+                    #self.all_verts.append(tf.gather(verts, self.show_these))
                     #if(not self.use_mesh_repro_loss):
-#                    self.all_pred_kps.append(tf.gather(pred_kp, self.show_these))
-#                    if(self.use_mesh_repro_loss):
-#                        self.all_pred_silhouettes.append(tf.gather(silhouette_pred, self.show_these))
-#                    self.all_pred_cams.append(tf.gather(cams, self.show_these))
+                    #self.all_pred_kps.append(tf.gather(pred_kp, self.show_these))
+                    #if(self.use_mesh_repro_loss):
+                    #    self.all_pred_silhouettes.append(tf.gather(silhouette_pred, self.show_these))
+                    #self.all_pred_cams.append(tf.gather(cams, self.show_these))
 
                     # Finally update to end iteration.
                     theta_prev = theta_here
@@ -378,18 +379,21 @@ class HMRTrainer(object):
                 generator_loss += (-self.critic_loss_weight * critic_loss)
                 print("critic loss", critic_loss)
 
-#            #TODO no 3d labels used yet
-#            if self.use_3d_label:
-#                self.generator_loss_3d = loss_3d_params[-1]
-#                self.generator_loss_3d_joints = loss_3d_joints[-1]
-#
-#                self.generator_loss += (self.generator_loss_3d + self.generator_loss_3d_joints)
+            ##TODO no 3d labels used yet
+            #if self.use_3d_label:
+            #    self.generator_loss_3d = loss_3d_params[-1]
+            #    self.generator_loss_3d_joints = loss_3d_joints[-1]
 
-#            all_train_vars = self.generator3d.trainable_variables + self.image_feature_extractor.trainable_variables
+            #  self.generator_loss += (self.generator_loss_3d + self.generator_loss_3d_joints)
+
+            #all_train_vars = self.generator3d.trainable_variables + self.image_feature_extractor.trainable_variables
 
             print("generator_loss", generator_loss)
+            print("gen_tape", gen_tape)
+            print('trainable_variables', self.generator3d.trainable_variables)
             gradients_of_generator = gen_tape.gradient(generator_loss,
                                                        self.generator3d.trainable_variables)
+            print("gradients", gradients_of_generator)
             self.generator_optimizer.apply_gradients(zip(gradients_of_generator,
                                                     self.generator3d.trainable_variables))
 
@@ -537,7 +541,11 @@ class HMRTrainer(object):
             for data_gen, data_critic in self.full_dataset:
 
                 images, segmentations, keypoints = data_gen
-                joints, shapes = data_critic
+                if not self.encoder_only:
+                    joints, shapes = data_critic
+                else:
+                    joints = None
+                    shapes = None
 
                 self.train_step(images, segmentations, keypoints, joints,
                                 shapes, epoch*self.num_itr_per_epoch + itr)
