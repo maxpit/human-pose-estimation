@@ -222,7 +222,7 @@ class HMRTrainer(object):
 
         return False
 
-    @tf.function
+
     def load_mean_param(self):
         print("LOAD MEAN PARAM THETA")
         mean = np.zeros((1, self.total_params))
@@ -242,10 +242,10 @@ class HMRTrainer(object):
 
         mean[0, 3:] = np.hstack((mean_pose, mean_shape))
         mean = tf.constant(mean, tf.float32)
-        self.mean_var = tf.Variable(
+        mean_var = tf.Variable(
             mean, name="mean_param", dtype=tf.float32, trainable=True)
-        init_mean = tf.tile(self.mean_var, [self.batch_size, 1])
-        return init_mean
+        #init_mean = tf.tile(self.mean_var, [self.batch_size, 1])
+        return mean_var
 
     # Notice the use of `tf.function`
     # This annotation causes the function to be "compiled".
@@ -282,7 +282,7 @@ class HMRTrainer(object):
                 #Extract feature vector from image using resnet
                 #print("small_images.shape", small_images.shape)
                 extracted_features = self.image_feature_extractor(small_images, training=True)
-                theta_prev = self.load_mean_param()
+                theta_prev = tf.tile(self.mean_var, [self.batch_size, 1])
                 #print("extracted_features.shape", extracted_features.shape)
                 #print("theta_prev.shape", theta_prev.shape)
                 # Main IEF loop
@@ -441,6 +441,8 @@ class HMRTrainer(object):
             #variables = []
 
             variables = self.image_feature_extractor.trainable_variables + self.generator3d.trainable_variables
+            print("mean var: ", self.mean_var)
+            variables.append(self.mean_var)
             #print("variables: ", variables)
 
             if self.use_kp_loss and self.use_mesh_repro_loss:
@@ -592,8 +594,7 @@ class HMRTrainer(object):
         # For rendering!
 
         print('...')
-        logdir = "./logs_tf2/"
-        tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=logdir)
+        self.mean_var = self.load_mean_param()
         for epoch in range(self.max_epoch):
 
             itr = 0
