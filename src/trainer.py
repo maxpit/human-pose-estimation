@@ -259,14 +259,22 @@ class HMRTrainer(object):
         batched_images = tf.split(images, self.num_gen_steps_per_itr)
         batched_seg_gts = tf.split(seg_gts, self.num_gen_steps_per_itr)
         batched_kp2d_gts = tf.split(kp2d_gts, self.num_gen_steps_per_itr)
-        print("batched_images len", len(batched_images))
         #Do more generator steps than critic steps per train
-        iteration = 0
+
+        print("batched_images", len(batched_images))
+        print("batched_seg_gts", len(batched_seg_gts))
+        print("batched_kp2d_gts", len(batched_kp2d_gts))
+        print("images", images)
+        print("seg_gts", seg_gts)
+        print("kp2d_gts", kp2d_gts)
+        print("joint3d_gt", joint3d_gt)
+        print("shape_gts", shape_gts)
+        print("step", step)
+
         for small_images, small_seg, small_kps in zip(batched_images,
                                                       batched_seg_gts,
                                                       batched_kp2d_gts):
-            iteration += 1
-            print("iter", iteration)
+            print("small_images", small_images)
             # First make sure data_format is right
             if self.data_format == 'NCHW':
                 # B x H x W x 3 --> B x 3 x H x W
@@ -274,6 +282,7 @@ class HMRTrainer(object):
                 small_seg = tf.transpose(small_seg, [0, 3, 1, 2])
 
             fake_joints = []
+            fake_shapes = []
             kp_losses = []
             mr_losses = []
             cr_losses = []
@@ -305,6 +314,7 @@ class HMRTrainer(object):
                     generated_cams = theta_here[:, :self.num_cam]
                     generated_poses = theta_here[:, self.num_cam:(self.num_cam + self.num_theta)]
                     generated_shapes = theta_here[:, (self.num_cam + self.num_theta):]
+                    fake_shapes.append(generated_shapes)
 
                     # Rs_wglobal is Nx24x3x3 rotation matrices of poses
                     generated_verts, generated_joints, generated_pred_Rs = self.smpl(generated_shapes, generated_poses, get_skin=True)
@@ -421,8 +431,8 @@ class HMRTrainer(object):
             #print("generator_loss without critic", generator_loss)
 
             if not self.encoder_only:
-                generator_loss += (-self.critic_loss_weight * critic_loss)
                 print("critic loss", critic_loss)
+                generator_critic_loss = (-self.critic_loss_weight * critic_loss)
 
             ##TODO no 3d labels used yet
             #if self.use_3d_label:
@@ -446,7 +456,7 @@ class HMRTrainer(object):
             #print("variables: ", variables)
 
             if self.use_kp_loss and self.use_mesh_repro_loss:
-                gradients_of_generator = gen_tape.gradient([generator_loss1, generator_loss2], variables
+                gradients_of_generator = gen_tape.gradient([generator_loss1, generator_loss2, generator_critic_loss], variables
                                                             )
             else:
                 gradients_of_generator = gen_tape.gradient(generator_loss,
@@ -455,7 +465,7 @@ class HMRTrainer(object):
             self.generator_optimizer.apply_gradients(zip(gradients_of_generator,
                                                     variables))
 
-            print("APPLIED GRADIENTS =)")
+            print("APPLIED GRADIENTS GENERATOR =)")
             #print("step %g: time %g, generator_loss: %.4f" %(step, 0, generator_loss))
         ############################################################################################
         # Write Generator update to tensorboard
@@ -472,7 +482,7 @@ class HMRTrainer(object):
             """
             if step % self.log_img_step == 0:
                 print('i would be drawing images now')
-                self.draw_results(small_images, small_seg, small_kps, est_verts, joints, cam, step,
+                self.draw_results(small_images, small_seg, small_kps, generated_verts, generated_joints, generated_cams, step,
                                  self.generator_writer)
                 #self.draw_results(result, self.generator_writer)
             """
@@ -481,36 +491,42 @@ class HMRTrainer(object):
         #############################################################################################
 
         if not self.encoder_only:
-            with tf.GradientTape as critic_tape:
+            with tf.GradientTape() as critic_tape:
+                num_joints = 14
                 all_fake_joints = tf.concat(fake_joints, 0)
-                print('real_joints', joint3d_gt)
-                print('fake_joints', all_fake_joints)
                 all_fake_shapes = tf.concat(fake_shapes, 0)
+                print('real_joints', joint3d_gt)
+                print('real_shapes', shape_gts)
+                print('fake_joints', fake_joints)
+                print('fake_shapes', fake_shapes)
+                print('all_fake_joints', all_fake_joints)
+                print('all_fake_shapes', all_fake_shapes)
 
                 real_kcs = get_kcs(joint3d_gt, self.C)
-                real_output = self.critic_network([joint3d_gt, shape_gts,
-                                                  real_kcs], training=True)
+                real_output = self.critic_network([real_kcs, joint3d_gt[:,:num_joints,:], shape_gts], training=True)
 
                 fake_kcs = get_kcs(all_fake_joints, self.C)
-                fake_output = self.critic_network([all_fake_joints,
-                                                  all_fake_shapes, fake_kcs],
+                fake_output = self.critic_network([fake_kcs, all_fake_joints[:,:num_joints,:],
+                                                  all_fake_shapes],
                                                   training=True)
 
-                critic_loss = -(real_output - fake_output)
+                critic_loss = -(tf.reduce_sum(real_output - fake_output)/real_output.shape[0])
+                print("critic_loss:", critic_loss)
 
-            gradients_of_discriminator = disc_tape.gradient(critic_loss,
+            gradients_of_discriminator = critic_tape.gradient(critic_loss,
                                                             self.critic_network.trainable_variables)
             self.critic_optimizer.apply_gradients(zip(gradients_of_discriminator,
                                                         self.critic_network.trainable_variables))
+            print("APPLIED GRADIENTS CRITIC :-)")
+            #print("step %g: time %g, generator_loss: %.4f" %(step, 0, critic_loss))
 
-            print("step %g: time %g, generator_loss: %.4f" %(step, 0, critic_loss))
-
-            ############################################################################################
+            ######  ######################################################################################
             # Write Critic update to tensorboard
             ############################################################################################
             with self.critic_writer.as_default():
-                self.critic_writer.scalar('critic_loss', critic_loss,
-                                             step=step)
+                tf.summary.scalar('critic_loss', critic_loss,
+                                             step=int(step))
+                self.critic_writer.flush()
 
     def visualize_img(self, img, gt_kp, vert, pred_kp, cam, renderer, seg_gt=None):
         """
@@ -562,7 +578,7 @@ class HMRTrainer(object):
             segs_gt = np.empty_like(imgs)
 
         for img_id, (img, seg_gt, gt_kp, verts, joints, cams) in enumerate(
-                zip(imgs, segs_gt, gt_kps, est_verts, joints, cams)):
+                zip(imgs, segs_gt, gt_kps, est_verts, joints, cam)):
             # verts, joints, cams are a list of len T.
             all_rend_imgs = []
             for vert, joint, cam in zip(verts, joints, cams):
@@ -600,10 +616,10 @@ class HMRTrainer(object):
             itr = 0
             print("epoch", epoch)
             for data_gen, data_critic in self.full_dataset:
-
                 images, segmentations, keypoints = data_gen
                 if not self.encoder_only:
                     joints, shapes = data_critic
+                    joints = tf.squeeze(joints, axis=1)
                 else:
                     joints = None
                     shapes = None
@@ -615,6 +631,5 @@ class HMRTrainer(object):
                 print("itr", itr, "/", self.num_itr_per_epoch)
                 if itr >= self.num_itr_per_epoch:
                     break
-
 
         print('Finish training on %s' % self.model_dir)

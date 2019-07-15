@@ -367,6 +367,7 @@ def precompute_C_matrix(num_joints=14):
     return C
 
 def get_kcs(joints, C_matrix, num_joints=14):
+
     joints = joints[:, :num_joints, :]
     joints_tr = tf.transpose(joints, perm=[0, 2, 1])
     B = tf.tensordot(joints_tr, C_matrix, 1)
@@ -402,6 +403,7 @@ def Critic_network(num_joints=14):
        7: right upper arm; 8: right collarbone; 9: left collarbone; 10: left upper arm; 11: left forearm; 12: neck;
        13-?: face
     """
+    print("CRITIC NETWORK")
     if(num_joints == 14):
         kcs_input_shape = (13, 13)
         joints_input_shape = (14, 3)
@@ -411,21 +413,21 @@ def Critic_network(num_joints=14):
     else:
         kcs_input_shape, joints_input_shape = None
 
-    kcs_input = layers.Input(shape=kcs_input_shape)
+    kcs_input = layers.Input(shape=kcs_input_shape, name="kcs_in")
     kcs_out = layers.Flatten()(kcs_input)
-    kcs_out = layers.Dense(100, activation=tf.nn.leaky_relu)(kcs_out)
+    kcs_out = layers.Dense(100, activation=tf.nn.leaky_relu, name="kcs_dense")(kcs_out)
 
     joints_input = layers.Input(shape=joints_input_shape)
     joints_out = layers.Flatten()(joints_input)
-    joints_out = layers.Dense(100, activation=tf.nn.leaky_relu)(joints_out)
+    joints_out = layers.Dense(100, activation=tf.nn.leaky_relu, name="joints_dense")(joints_out)
 
     critic_joints_out = tf.concat([kcs_out, joints_out], 1)
-    critic_joints_out = layers.Dense(1, input_shape=critic_joints_out.shape[1:])(critic_joints_out)
+    critic_joints_out = layers.Dense(1, input_shape=critic_joints_out.shape[1:], name="combined_dense")(critic_joints_out)
 
     shapes_input = layers.Input(shape=(10,))
-    shapes_out = layers.Dense(10, activation='relu')(shapes_input)
-    shapes_out = layers.Dense(5, activation='relu')(shapes_out)
-    shapes_out = layers.Dense(1)(shapes_out)
+    shapes_out = layers.Dense(10, activation='relu', name="shapes_dense_1")(shapes_input)
+    shapes_out = layers.Dense(5, activation='relu', name="shapes_dense_2")(shapes_out)
+    shapes_out = layers.Dense(1, name="shapes_dense_3")(shapes_out)
 
     critic_out = tf.concat([critic_joints_out, shapes_out], 1)
 
