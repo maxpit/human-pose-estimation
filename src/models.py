@@ -43,6 +43,7 @@ def Encoder_resnet(is_training=True, weight_decay=0.001, reuse=False):
     with tf.name_scope("Encoder_resnet"):
         resnet = apps.ResNet50(include_top=False, weights='imagenet', pooling='avg')
         #resnet.trainable = is_training
+
     return resnet
 
     #         net, end_points = resnet_v2.resnet_v2_50(

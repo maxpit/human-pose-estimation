@@ -201,9 +201,9 @@ def mesh_reprojection_loss(silhouette_gt, silhouette_pred, batch_size, name="mes
             #loss = bidirectional_dist(tf.gather_nd(silhouette_gt,
              #                                       tf.where(tf.equal(silhouette_gt[:,0], 0)))[:, 1:], silhouette_pred[0,:,:])
         #else:
-        loss = tf.Variable(0, name="mesh_reprojection_loss", trainable=False, dtype=tf.float64) # variable?
-        ab_all = tf.Variable(0., trainable=False) # variable?
-        ba_all = tf.Variable(0., trainable=False) # variable?
+        #loss = tf.Variable(0, name="mesh_reprojection_loss", trainable=False, dtype=tf.float32) # variable?
+        #ab_all = tf.Variable(0., trainable=False) # variable?
+        #ba_all = tf.Variable(0., trainable=False) # variable?
         for i in range(batch_size):
             silhouette_points_gt = tf.stack([tf.gather_nd(silhouette_gt,
                                             tf.where(tf.equal(silhouette_gt[:, 0], i)))[:, 2],
@@ -211,11 +211,15 @@ def mesh_reprojection_loss(silhouette_gt, silhouette_pred, batch_size, name="mes
                                                           tf.where(tf.equal(silhouette_gt[:, 0], i)))[:, 1]
                                              ], axis=1)
 
-            bi_loss, ba, ab = bidirectional_dist(silhouette_points_gt,
+            bi_loss, _, _ = bidirectional_dist(silhouette_points_gt,
                                silhouette_pred[i, :, :])
             bi_loss_scaled = bi_loss/(silhouette_gt.shape[1] +
                                       silhouette_pred.shape[1])
-            loss = tf.add(loss, bi_loss_scaled)
+            if i == 0:
+                loss = bi_loss_scaled
+            else:
+                loss = loss + bi_loss_scaled
+            #loss = tf.add(loss, bi_loss_scaled)
             #ab_all = tf.math.add(ab_all, ab)
             #ba_all = tf.math.add(ba_all, ba)
         return loss#, ab_all, ba_all, tf.stack([tf.gather_nd(silhouette_gt,

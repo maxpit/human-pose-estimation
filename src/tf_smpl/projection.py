@@ -40,20 +40,26 @@ def reproject_vertices(verts, cam, im_size, name=None):
         verts_im:   N x 6890 x 2
     """
     with tf.name_scope("mesh_reproject"):
+        #im_size = tf.constant(im_size, tf.float32)
         print("VERTS!!!!!!:",verts)
         print("CAM!!!!!!!!:",cam)
         verts_reprojected = batch_orth_proj_idrot(verts, cam)
+
         print("VERTS again", verts_reprojected)
         verts_calc = tf.multiply(tf.add(verts_reprojected,
-                                          tf.ones_like(verts_reprojected)), 0.5)
+                                          tf.ones_like(verts_reprojected)), 0.5) #TODO: check if output is same
+        #verts_calc = (verts_reprojected + tf.ones_like(verts_reprojected)) * 0.5
         print("Verts calc", verts_calc)
         print("image size", im_size)
-        print("constant im size", tf.constant([im_size[0], im_size[1]]))
-        verts_calc = tf.multiply(verts_calc, im_size)
+        #print("constant im size", tf.constant([im_size[0], im_size[1]]))
+        verts_calc = tf.multiply(verts_calc, im_size) #TODO: check if output is same
+        #verts_calc = verts_calc * im_size
+
         #verts_im = tf.cast(verts_calc, tf.int32)
         #print("verts_im", verts_im)
         #TODO check whether multiplication is right
         return verts_calc
+
 
 """
 def reproject_vertices(proc_param, verts, cam, im_size):
