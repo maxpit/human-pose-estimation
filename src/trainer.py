@@ -285,7 +285,7 @@ class HMRTrainer(object):
             fake_shapes = []
             kp_losses = []
             mr_losses = []
-            cr_losses = []
+            #cr_losses = []
 
             with tf.GradientTape() as gen_tape:
                 #Extract feature vector from image using resnet
@@ -367,13 +367,15 @@ class HMRTrainer(object):
                     if not self.encoder_only:
                         kcs = get_kcs(generated_joints, self.C)
                         generated_joints = tf.transpose(generated_joints, perm=[0,2,1])[:,:,:14]
-                        critic_loss = self.critic_network([kcs,
+                        generator_critic_loss = self.critic_network([kcs,
                                                            generated_joints,
                                                            generated_shapes],
                                                            training=True
                                                          )
-                        cr_losses.append(critic_loss *
-                                             self.critic_loss_weight)
+                        generator_critic_loss = tf.reduce_sum(generator_critic_loss)/generator_critic_loss.shape[0]
+                        print("CRITIC LOSS", generator_critic_loss)
+                        #cr_losses.append(critic_loss *
+                        #                     self.critic_loss_weight)
 
 
                     # Save things for visualiations:
@@ -430,9 +432,9 @@ class HMRTrainer(object):
                 generator_loss = None
             #print("generator_loss without critic", generator_loss)
 
-            if not self.encoder_only:
-                print("critic loss", critic_loss)
-                generator_critic_loss = (-self.critic_loss_weight * critic_loss)
+            #if not self.encoder_only:
+            #    #print("critic loss", critic_loss)
+            #    generator_critic_loss = (-self.critic_loss_weight * critic_loss)
 
             ##TODO no 3d labels used yet
             #if self.use_3d_label:
@@ -453,14 +455,20 @@ class HMRTrainer(object):
             variables = self.image_feature_extractor.trainable_variables + self.generator3d.trainable_variables
             variables.append(self.mean_var)
 
+            print("variables generator len", len(self.generator3d.trainable_variables))
+            print("variables extractor len", len(self.image_feature_extractor.trainable_variables))
+            print("variables mean va", self.mean_var)
+            print("variables len", len(variables))
+
             if self.use_kp_loss and self.use_mesh_repro_loss:
                 generator_loss_sum = [generator_loss1, generator_loss2]
             else:
                 generator_loss_sum = generator_loss
             if not self.encoder_only:
                 generator_loss_sum.append(generator_critic_loss)
-
+            print("gen loss sum", len(generator_loss_sum), generator_loss_sum)
             gradients_of_generator = gen_tape.gradient(generator_loss_sum, variables)
+            print("gradients generator length", len(gradients_of_generator))
             self.generator_optimizer.apply_gradients(zip(gradients_of_generator, variables))
 
             print("APPLIED GRADIENTS GENERATOR =)")
@@ -508,21 +516,24 @@ class HMRTrainer(object):
                                                   all_fake_shapes],
                                                   training=True)
 
-                critic_loss = -(tf.reduce_sum(real_output - fake_output)/real_output.shape[0])
-                print("critic_loss:", critic_loss)
+                critic_network_loss = -(tf.reduce_sum(real_output - fake_output)/real_output.shape[0])
+                #print("critic_network_loss:", critic_network_loss)
 
-            gradients_of_discriminator = critic_tape.gradient(critic_loss,
+            gradients_of_discriminator = critic_tape.gradient(critic_network_loss,
                                                             self.critic_network.trainable_variables)
             self.critic_optimizer.apply_gradients(zip(gradients_of_discriminator,
                                                         self.critic_network.trainable_variables))
+            print("variables critic network length:", len(self.critic_network.trainable_variables))
+            print("gradients critic length:", len(gradients_of_discriminator))
+            print("critic network loss:", critic_network_loss)
             print("APPLIED GRADIENTS CRITIC :-)")
-            #print("step %g: time %g, generator_loss: %.4f" %(step, 0, critic_loss))
+            #print("step %g: time %g, generator_loss: %.4f" %(step, 0, critic_network_loss))
 
             ######  ######################################################################################
             # Write Critic update to tensorboard
             ############################################################################################
             with self.critic_writer.as_default():
-                tf.summary.scalar('critic_loss', critic_loss,
+                tf.summary.scalar('critic_network_loss', critic_network_loss,
                                              step=int(step))
                 self.critic_writer.flush()
 
