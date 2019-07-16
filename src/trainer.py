@@ -451,19 +451,17 @@ class HMRTrainer(object):
             #variables = []
 
             variables = self.image_feature_extractor.trainable_variables + self.generator3d.trainable_variables
-            print("mean var: ", self.mean_var)
             variables.append(self.mean_var)
-            #print("variables: ", variables)
 
             if self.use_kp_loss and self.use_mesh_repro_loss:
-                gradients_of_generator = gen_tape.gradient([generator_loss1, generator_loss2, generator_critic_loss], variables
-                                                            )
+                generator_loss_sum = [generator_loss1, generator_loss2]
             else:
-                gradients_of_generator = gen_tape.gradient(generator_loss,
-                                                           variables)
-            #print("gradients", gradients_of_generator)
-            self.generator_optimizer.apply_gradients(zip(gradients_of_generator,
-                                                    variables))
+                generator_loss_sum = generator_loss
+            if not self.encoder_only:
+                generator_loss_sum.append(generator_critic_loss)
+
+            gradients_of_generator = gen_tape.gradient(generator_loss_sum, variables)
+            self.generator_optimizer.apply_gradients(zip(gradients_of_generator, variables))
 
             print("APPLIED GRADIENTS GENERATOR =)")
             #print("step %g: time %g, generator_loss: %.4f" %(step, 0, generator_loss))
