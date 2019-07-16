@@ -90,7 +90,6 @@ class HMRTrainer(object):
         self.generator_lr = config.generator_lr
         self.critic_lr = config.critic_lr
 
-        self.global_step = 0
         #######################################################################################
         # Calculate necessary information
         #######################################################################################
@@ -250,7 +249,7 @@ class HMRTrainer(object):
     # Notice the use of `tf.function`
     # This annotation causes the function to be "compiled".
     @tf.function
-    def train_step(self, images, seg_gts, kp2d_gts, joint3d_gt, shape_gts, step):
+    def train_step(self, images, seg_gts, kp2d_gts, joint3d_gt, shape_gts):
 
         #############################################################################################
         # Generator update
@@ -261,20 +260,20 @@ class HMRTrainer(object):
         batched_kp2d_gts = tf.split(kp2d_gts, self.num_gen_steps_per_itr)
         #Do more generator steps than critic steps per train
 
-        print("batched_images", len(batched_images))
-        print("batched_seg_gts", len(batched_seg_gts))
-        print("batched_kp2d_gts", len(batched_kp2d_gts))
-        print("images", images)
-        print("seg_gts", seg_gts)
-        print("kp2d_gts", kp2d_gts)
-        print("joint3d_gt", joint3d_gt)
-        print("shape_gts", shape_gts)
-        print("step", step)
+        tf.print("batched_images", len(batched_images))
+        tf.print("batched_seg_gts", len(batched_seg_gts))
+        tf.print("batched_kp2d_gts", len(batched_kp2d_gts))
+        tf.print("images", images)
+        tf.print("seg_gts", seg_gts)
+        tf.print("kp2d_gts", kp2d_gts)
+        tf.print("joint3d_gt", joint3d_gt)
+        tf.print("shape_gts", shape_gts)
+        tf.print("step", self.global_step)
 
         for small_images, small_seg, small_kps in zip(batched_images,
                                                       batched_seg_gts,
                                                       batched_kp2d_gts):
-            print("small_images", small_images)
+            tf.print("small_images", small_images)
             # First make sure data_format is right
             if self.data_format == 'NCHW':
                 # B x H x W x 3 --> B x 3 x H x W
@@ -285,7 +284,9 @@ class HMRTrainer(object):
             fake_shapes = []
             kp_losses = []
             mr_losses = []
-            #cr_losses = []
+            all_pred_kps = []
+            all_pred_silhouettes = []
+            generator_critic_losses = []
 
             with tf.GradientTape() as gen_tape:
                 #Extract feature vector from image using resnet
@@ -295,9 +296,9 @@ class HMRTrainer(object):
                 #print("extracted_features.shape", extracted_features.shape)
                 #print("theta_prev.shape", theta_prev.shape)
                 # Main IEF loop
-                for i in np.arange(self.num_stage):
+                for i in tf.range(self.num_stage):
                 #for i in np.arange(1):
-                    print('iteration', i)
+                    tf.print('iteration', i)
                     #print("theta_prev", self.theta_prev)
                     state = tf.concat([extracted_features, theta_prev], 1)
                     #print(state.shape)
@@ -322,14 +323,16 @@ class HMRTrainer(object):
 
                     #Calculate keypoint reprojection
                     if self.use_kp_loss:
-                        pred_kp = batch_orth_proj_idrot(generated_joints, generated_cams, name='proj2d_stage%d' % i)
+                        pred_kp = batch_orth_proj_idrot(generated_joints, generated_cams, name='proj2d_staged' )
+                        all_pred_kps.append(pred_kp)
 
                     #Calculate mesh reprojection
                     if self.use_mesh_repro_loss:
                         silhouette_pred = reproject_vertices(generated_verts,
                                                              generated_cams,
                                                              tf.constant([self.img_size, self.img_size], tf.float32),
-                                                             name='mesh_reproject_stage%d' % i)
+                                                             name='mesh_reproject_staged')
+                        all_pred_silhouettes.append(silhouette_pred)
 
                     ##############################################################################################
                     # Calculate Generator Losses
@@ -338,7 +341,7 @@ class HMRTrainer(object):
                     #Calculate keypoint reprojection loss
                     if self.use_kp_loss:
                         kp_losses.append(
-                            self.generator_kp_loss_weight * self.keypoint_loss(small_kps, pred_kp)
+                            self.generator_kp_loss_weight * self.keypoint_loss(small_kps, all_pred_kps[-1])
                         )
 
                     #Calculate mesh reprojection loss
@@ -346,11 +349,10 @@ class HMRTrainer(object):
                         # silhouette_gt: first entry = index sample; 
                         #                second,third = coordinate of pixel with value > 0.
                         silhouette_gt = tf.cast(tf.where(tf.greater(small_seg, 0.))[:, :3], tf.float32)
-                        self.silhouette_pred = silhouette_pred
                         self.silhouette_gt = small_seg
 
                         repro_loss = self.mesh_repro_loss(
-                            silhouette_gt, silhouette_pred, self.batch_size, name='mesh_repro_loss' % i)
+                            silhouette_gt, all_pred_silhouettes[-1], self.batch_size, name='mesh_repro_loss' % i)
                         repro_loss_scaled = repro_loss * self.mr_loss_weight
 
                         mr_losses.append(repro_loss_scaled)
@@ -373,9 +375,8 @@ class HMRTrainer(object):
                                                            training=True
                                                          )
                         generator_critic_loss = tf.reduce_sum(generator_critic_loss)/generator_critic_loss.shape[0]
-                        print("CRITIC LOSS", generator_critic_loss)
-                        #cr_losses.append(critic_loss *
-                        #                     self.critic_loss_weight)
+                        tf.print("CRITIC LOSS", generator_critic_loss)
+                        generator_critic_losses.append(critic_loss * self.critic_loss_weight)
 
 
                     # Save things for visualiations:
@@ -418,19 +419,6 @@ class HMRTrainer(object):
             # Generator optimization
             ###########################################################################################
 
-            # Calculate overall generator loss
-            # Just the last loss.
-            if self.use_kp_loss and not self.use_mesh_repro_loss:
-                generator_loss = kp_losses[-1]
-            elif not self.use_kp_loss and self.use_mesh_repro_loss:
-                generator_loss = mr_losses[-1]
-            elif self.use_kp_loss and self.use_mesh_repro_loss:
-                #print(kp_losses, mr_losses)
-                generator_loss1 = kp_losses[-1]
-                generator_loss2 = mr_losses[-1]
-            else:
-                generator_loss = None
-            #print("generator_loss without critic", generator_loss)
 
             #if not self.encoder_only:
             #    #print("critic loss", critic_loss)
@@ -455,35 +443,38 @@ class HMRTrainer(object):
             variables = self.image_feature_extractor.trainable_variables + self.generator3d.trainable_variables
             variables.append(self.mean_var)
 
-            print("variables generator len", len(self.generator3d.trainable_variables))
-            print("variables extractor len", len(self.image_feature_extractor.trainable_variables))
-            print("variables mean va", self.mean_var)
-            print("variables len", len(variables))
+            tf.print("variables generator len", len(self.generator3d.trainable_variables))
+            tf.print("variables extractor len", len(self.image_feature_extractor.trainable_variables))
+            tf.print("variables mean va", self.mean_var)
+            tf.print("variables len", len(variables))
 
-            if self.use_kp_loss and self.use_mesh_repro_loss:
-                generator_loss_sum = [generator_loss1, generator_loss2]
-            else:
-                generator_loss_sum = generator_loss
+            tf.print(kp_losses[-1])
+            tf.print(mr_losses[-1])
+            tf.print(generator_critic_losses[-1])
+            generator_loss_sum = []
+            if self.use_kp_loss:
+                generator_loss_sum.append(kp_losses[-1])
+            if self.use_mesh_repro_loss:
+                generator_loss_sum.append(mr_losses[-1])
             if not self.encoder_only:
-                generator_loss_sum.append(generator_critic_loss)
-            print("gen loss sum", len(generator_loss_sum), generator_loss_sum)
+                generator_loss_sum.append(generator_critic_losses[-1])
+
+            tf.print("gen loss sum", generator_loss_sum)
             gradients_of_generator = gen_tape.gradient(generator_loss_sum, variables)
-            print("gradients generator length", len(gradients_of_generator))
+            tf.print("gradients generator length", len(gradients_of_generator))
             self.generator_optimizer.apply_gradients(zip(gradients_of_generator, variables))
 
-            print("APPLIED GRADIENTS GENERATOR =)")
+            tf.print("APPLIED GRADIENTS GENERATOR =)")
             #print("step %g: time %g, generator_loss: %.4f" %(step, 0, generator_loss))
+
+            tf.assign(self.global_step, self.global_step + 1)
         ############################################################################################
         # Write Generator update to tensorboard
         ############################################################################################
 
         with self.generator_writer.as_default():
-            tf.summary.scalar('kp_loss_total', generator_loss1,
-                                         step=int(step))
-            tf.summary.scalar('mr_loss_total', generator_loss2,
-                              step=int(step))
-            tf.summary.scalar('kp_loss', kp_losses[-1], step=int(step))
-            tf.summary.scalar('mr_loss', mr_losses[-1], step=int(step))
+            tf.summary.scalar('kp_loss', kp_losses[-1], step=self.global_step)
+            tf.summary.scalar('mr_loss', mr_losses[-1], step=self.global_step)
             self.generator_writer.flush()
             """
             if step % self.log_img_step == 0:
@@ -501,12 +492,12 @@ class HMRTrainer(object):
                 num_joints = 14
                 all_fake_joints = tf.concat(fake_joints, 0)
                 all_fake_shapes = tf.concat(fake_shapes, 0)
-                print('real_joints', joint3d_gt)
-                print('real_shapes', shape_gts)
-                print('fake_joints', fake_joints)
-                print('fake_shapes', fake_shapes)
-                print('all_fake_joints', all_fake_joints)
-                print('all_fake_shapes', all_fake_shapes)
+                tf.print('real_joints', joint3d_gt)
+                tf.print('real_shapes', shape_gts)
+                tf.print('fake_joints', fake_joints)
+                tf.print('fake_shapes', fake_shapes)
+                tf.print('all_fake_joints', all_fake_joints)
+                tf.print('all_fake_shapes', all_fake_shapes)
 
                 real_kcs = get_kcs(joint3d_gt, self.C)
                 real_output = self.critic_network([real_kcs, joint3d_gt[:,:num_joints,:], shape_gts], training=True)
@@ -523,10 +514,10 @@ class HMRTrainer(object):
                                                             self.critic_network.trainable_variables)
             self.critic_optimizer.apply_gradients(zip(gradients_of_discriminator,
                                                         self.critic_network.trainable_variables))
-            print("variables critic network length:", len(self.critic_network.trainable_variables))
-            print("gradients critic length:", len(gradients_of_discriminator))
-            print("critic network loss:", critic_network_loss)
-            print("APPLIED GRADIENTS CRITIC :-)")
+            tf.print("variables critic network length:", len(self.critic_network.trainable_variables))
+            tf.print("gradients critic length:", len(gradients_of_discriminator))
+            tf.print("critic network loss:", critic_network_loss)
+            tf.print("APPLIED GRADIENTS CRITIC :-)")
             #print("step %g: time %g, generator_loss: %.4f" %(step, 0, critic_network_loss))
 
             ######  ######################################################################################
@@ -534,7 +525,7 @@ class HMRTrainer(object):
             ############################################################################################
             with self.critic_writer.as_default():
                 tf.summary.scalar('critic_network_loss', critic_network_loss,
-                                             step=int(step))
+                                             step=self.global_step)
                 self.critic_writer.flush()
 
     def visualize_img(self, img, gt_kp, vert, pred_kp, cam, renderer, seg_gt=None):
@@ -607,8 +598,8 @@ class HMRTrainer(object):
             sio.seek(0)
 
             with writer.as_default():
-                print("img_summaries.append")
-                writer.image(("vis_images/%d" % img_id), vis_sum, step=step)
+                tf.print("img_summaries.append")
+                writer.image(("vis_images/%d" % img_id), vis_sum, step=self.global_step)
 
             sio.flush()
             sio.close()
@@ -620,6 +611,7 @@ class HMRTrainer(object):
 
         print('...')
         self.mean_var = self.load_mean_param()
+        self.global_step = tf.Variable(1, name='global_step', trainable=False, dtype=tf.int32)
         for epoch in range(self.max_epoch):
 
             itr = 0
@@ -633,8 +625,7 @@ class HMRTrainer(object):
                     joints = None
                     shapes = None
 
-                self.train_step(images, segmentations, keypoints, joints,
-                                shapes, epoch*self.num_itr_per_epoch + itr)
+                self.train_step(images, segmentations, keypoints, joints, shapes)
 
                 itr += self.num_gen_steps_per_itr
                 print("itr", itr, "/", self.num_itr_per_epoch)
