@@ -247,6 +247,8 @@ class HMRTrainer(object):
     #@tf.function
     def train_step(self, images, seg_gts, kp2d_gts, joint3d_gt, shape_gts):
 
+        result = {}
+
         #############################################################################################
         # Generator update
         #############################################################################################
@@ -460,23 +462,6 @@ class HMRTrainer(object):
             #print("step %g: time %g, generator_loss: %.4f" %(step, 0, generator_loss))
 
             self.global_step = self.global_step + 1
-        ############################################################################################
-        # Write Generator update to tensorboard
-        ############################################################################################
-
-        with self.generator_writer.as_default():
-            if self.use_kp_loss:
-                tf.summary.scalar('kp_loss', kp_losses[-1], step=self.global_step)
-            if self.use_mesh_repro_loss:
-                tf.summary.scalar('mr_loss', mr_losses[-1], step=self.global_step)
-            self.generator_writer.flush()
-            """
-            if step % self.log_img_step == 0:
-                print('i would be drawing images now')
-                self.draw_results(small_images, small_seg, small_kps, generated_verts, generated_joints, generated_cams, step,
-                                 self.generator_writer)
-                #self.draw_results(result, self.generator_writer)
-            """
         #############################################################################################
         # Critic update
         #############################################################################################
@@ -528,7 +513,7 @@ class HMRTrainer(object):
         Draws vert with text.
         Renderer is an instance of SMPLRenderer.
         """
-        gt_vis = gt_kp[:, 2].astype(bool)
+        gt_vis = tf.cast(gt_kp[:, 2], tf.bool)
         loss = np.sum((gt_kp[gt_vis, :2] - pred_kp[gt_vis])**2)
         debug_text = {"sc": cam[0], "tx": cam[1], "ty": cam[2], "kpl": loss}
         # Fix a flength so i can render this with persp correct scale
@@ -621,8 +606,27 @@ class HMRTrainer(object):
                 tf.summary.trace_on(graph=True, profiler=False)
 
                 start_time = time.time()
-                self.train_step(images, segmentations, keypoints, joints, shapes)
+                result = self.train_step(images, segmentations, keypoints, joints, shapes)
                 end_time = time.time()
+
+                ############################################################################################
+                # Write Generator update to tensorboard
+                ############################################################################################
+
+                with self.generator_writer.as_default():
+                    if self.use_kp_loss:
+                        tf.summary.scalar('kp_loss', kp_losses[-1], step=self.global_step)
+                    if self.use_mesh_repro_loss:
+                        tf.summary.scalar('mr_loss', mr_losses[-1], step=self.global_step)
+                    print((self.global_step % self.log_img_step))
+                    print(tf.constant(0, dtype=tf.int64))
+                    if tf.equal((self.global_step % self.log_img_step), tf.constant(0, dtype=tf.int64)):
+                        print("drawing images now")
+                        self.draw_results(small_images, small_seg, small_kps, generated_verts,
+                                          generated_joints, generated_cams, self.global_step,
+                                         self.generator_writer)
+                    self.generator_writer.flush()
+
 
                 print("one step took", (end_time - start_time), "seconds")
                 writer = tf.summary.create_file_writer('simple_logs/auto_test4')
