@@ -604,64 +604,67 @@ class HMRTrainer(object):
         self.mean_var = self.load_mean_param()
         self.global_step = tf.Variable(1, name='global_step', trainable=False, dtype=tf.int64)
         step = tf.Variable(1, name='step', trainable=False, dtype=tf.int64)
-        for epoch in range(self.max_epoch):
 
-            itr = 0
-            print("epoch", epoch)
-            for data_gen, data_critic in self.full_dataset:
-                images, segmentations, keypoints = data_gen
-                if not self.encoder_only:
-                    joints, shapes = data_critic
-                    joints = tf.squeeze(joints, axis=1)
-                else:
-                    joints = None
-                    shapes = None
-                tf.summary.trace_on(graph=True, profiler=False)
+        itr = 0
+        epoch = 0
+        for data_gen, data_critic in self.full_dataset:
+            images, segmentations, keypoints = data_gen
+            if not self.encoder_only:
+                joints, shapes = data_critic
+                joints = tf.squeeze(joints, axis=1)
+            else:
+                joints = None
+                shapes = None
+            tf.summary.trace_on(graph=True, profiler=False)
 
-                start_time = time.time()
-                result = self.train_step(images, segmentations, keypoints, joints, shapes, step)
-                end_time = time.time()
+            start_time = time.time()
+            result = self.train_step(images, segmentations, keypoints, joints, shapes, step)
+            end_time = time.time()
 
-                step = step + 1
-                ############################################################################################
-                # Write Generator update to tensorboard
-                ############################################################################################
+            step = step + 1
+            ############################################################################################
+            # Write Generator update to tensorboard
+            ############################################################################################
 
-                with self.generator_writer.as_default():
-                    if self.use_kp_loss:
-                        tf.summary.scalar('kp_loss', result["kp_losses"][-1], step=step)
-                    if self.use_mesh_repro_loss:
-                        tf.summary.scalar('mr_loss', result["mr_losses"][-1], step=step)
-                    print((step % self.log_img_step))
-                    if tf.equal((step % self.log_img_step), tf.constant(0, dtype=tf.int64)):
-                        show_images = tf.gather(images, self.show_these)
-                        show_segs = tf.gather(segmentations, self.show_these)
-                        show_kps = tf.gather(keypoints, self.show_these)
-                        print("drawing images now")
-                        self.draw_results(show_images, show_segs, show_kps,
-                                          result["generated_verts"], result["generated_kps"],
-                                          result["generated_cams"], step, self.generator_writer)
-                    self.generator_writer.flush()
+            with self.generator_writer.as_default():
+                if self.use_kp_loss:
+                    tf.summary.scalar('kp_loss', result["kp_losses"][-1], step=step)
+                if self.use_mesh_repro_loss:
+                    tf.summary.scalar('mr_loss', result["mr_losses"][-1], step=step)
+                if tf.equal((step % self.log_img_step), tf.constant(0, dtype=tf.int64)):
+                    show_images = tf.gather(images, self.show_these)
+                    show_segs = tf.gather(segmentations, self.show_these)
+                    show_kps = tf.gather(keypoints, self.show_these)
+                    print("drawing images now")
+                    self.draw_results(show_images, show_segs, show_kps,
+                                      result["generated_verts"], result["generated_kps"],
+                                      result["generated_cams"], step, self.generator_writer)
+                self.generator_writer.flush()
 
-                print("one step took", (end_time - start_time), "seconds")
-                writer = tf.summary.create_file_writer('simple_logs/auto_test6')
-                with writer.as_default():
-                  tf.summary.trace_export(
-                      name="my_func_trace",
-                      step=0)
+            print("one step took", (end_time - start_time), "seconds")
+            writer = tf.summary.create_file_writer('simple_logs/auto_test6')
+            with writer.as_default():
+              tf.summary.trace_export(
+                  name="my_func_trace",
+                  step=0)
 
-                ##############################################################################################
-                # Write Critic update to tensorboard
-                ############################################################################################
-                if not self.encoder_only:
-                    with self.critic_writer.as_default():
-                        tf.summary.scalar('critic_network_loss', result["critic_network_loss"],
-                                                 step=step)
-                        self.critic_writer.flush()
+            ##############################################################################################
+            # Write Critic update to tensorboard
+            ############################################################################################
+            if not self.encoder_only:
+                with self.critic_writer.as_default():
+                    tf.summary.scalar('critic_network_loss', result["critic_network_loss"],
+                                             step=step)
+                    self.critic_writer.flush()
 
-                itr += self.num_gen_steps_per_itr
-                print("itr", itr, "/", self.num_itr_per_epoch)
-                if itr >= self.num_itr_per_epoch:
+            itr += self.num_gen_steps_per_itr
+            print("itr", itr, "/", self.num_itr_per_epoch)
+            if itr >= self.num_itr_per_epoch:
+                itr = 0
+                epoch += 1
+
+                if epoch >= self.max_epoch:
                     break
 
+                print("epoch",epoch)
         print('Finish training on %s' % self.model_dir)
