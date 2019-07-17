@@ -244,19 +244,14 @@ class HMRTrainer(object):
 
     # Notice the use of `tf.function`
     # This annotation causes the function to be "compiled".
-    #@tf.function
-    def train_step(self, images, seg_gts, kp2d_gts, joint3d_gt, shape_gts):
-
-        result = {}
+    @tf.function
+    def train_step(self, images, seg_gts, kp2d_gts, joint3d_gt, shape_gts, step):
+        print("not autographed")
 
         #############################################################################################
         # Generator update
         #############################################################################################
 
-        batched_images = tf.split(images, self.num_gen_steps_per_itr)
-        batched_seg_gts = tf.split(seg_gts, self.num_gen_steps_per_itr)
-        batched_kp2d_gts = tf.split(kp2d_gts, self.num_gen_steps_per_itr)
-        #Do more generator steps than critic steps per train
 
         #tf.print("batched_images", len(batched_images))
         #tf.print("batched_seg_gts", len(batched_seg_gts))
@@ -268,142 +263,139 @@ class HMRTrainer(object):
         #tf.print("shape_gts", shape_gts)
         #tf.print("step", self.global_step)
 
-        for small_images, small_seg, small_kps in zip(batched_images,
-                                                      batched_seg_gts,
-                                                      batched_kp2d_gts):
-            #tf.print("small_images", small_images)
-            # First make sure data_format is right
-            if self.data_format == 'NCHW':
-                # B x H x W x 3 --> B x 3 x H x W
-                small_images = tf.transpose(small_images, [0, 3, 1, 2])
-                small_seg = tf.transpose(small_seg, [0, 3, 1, 2])
+        #tf.print("images", images)
+        # First make sure data_format is right
+        if self.data_format == 'NCHW':
+            # B x H x W x 3 --> B x 3 x H x W
+            images = tf.transpose(images, [0, 3, 1, 2])
+            seg_gts = tf.transpose(seg_gts, [0, 3, 1, 2])
 
-            fake_joints = []
-            fake_shapes = []
-            kp_losses = []
-            mr_losses = []
-            all_pred_kps = []
-            all_pred_silhouettes = []
-            generator_critic_losses = []
+        fake_joints = []
+        fake_shapes = []
+        kp_losses = []
+        mr_losses = []
+        all_pred_verts  = []
+        all_pred_cams  = []
+        all_pred_kps = []
+        all_pred_silhouettes = []
+        generator_critic_losses = []
 
-            with tf.GradientTape() as gen_tape:
-                #Extract feature vector from image using resnet
-                #print("small_images.shape", small_images.shape)
-                extracted_features = self.image_feature_extractor(small_images, training=True)
-                theta_prev = tf.tile(self.mean_var, [self.batch_size, 1])
-                #theta_prev = tf.zeros((self.batch_size, 85))
-                #print("extracted_features.shape", extracted_features.shape)
-                #print("theta_prev.shape", theta_prev.shape)
-                # Main IEF loop
-                for i in range(self.num_stage):
-                #for i in np.arange(1):
-                    #tf.print('iteration', i)
-                    #print("theta_prev", self.theta_prev)
-                    state = tf.concat([extracted_features, theta_prev], 1)
-                    #print(state.shape)
-                    #TODO how do i get reuse=true for this?
-                    if i != self.num_stage-1:
-                        delta_theta = self.generator3d(state, training=False)
-                    else:
-                        delta_theta = self.generator3d(state, training=True)#, reuse=True)
+        with tf.GradientTape() as gen_tape:
+            #Extract feature vector from image using resnet
+            #print("images.shape", images.shape)
+            extracted_features = self.image_feature_extractor(images, training=True)
+            theta_prev = tf.tile(self.mean_var, [self.batch_size, 1])
+            #theta_prev = tf.zeros((self.batch_size, 85))
+            #print("extracted_features.shape", extracted_features.shape)
+            #print("theta_prev.shape", theta_prev.shape)
+            # Main IEF loop
+            for i in range(self.num_stage):
+            #for i in np.arange(1):
+                #tf.print('iteration', i)
+                #print("theta_prev", self.theta_prev)
+                state = tf.concat([extracted_features, theta_prev], 1)
+                #print(state.shape)
+                #TODO how do i get reuse=true for this?
+                if i != self.num_stage-1:
+                    delta_theta = self.generator3d(state, training=False)
+                else:
+                    delta_theta = self.generator3d(state, training=True)#, reuse=True)
 
-                    # Compute new theta
-                    theta_here = theta_prev + delta_theta
-                    # cam = N x 3, pose N x self.num_theta, shape: N x 10
+                # Compute new theta
+                theta_here = theta_prev + delta_theta
+                # cam = N x 3, pose N x self.num_theta, shape: N x 10
 
-                    generated_cams = theta_here[:, :self.num_cam]
-                    generated_poses = theta_here[:, self.num_cam:(self.num_cam + self.num_theta)]
-                    generated_shapes = theta_here[:, (self.num_cam + self.num_theta):]
-                    fake_shapes.append(generated_shapes)
+                generated_cams = theta_here[:, :self.num_cam]
+                generated_poses = theta_here[:, self.num_cam:(self.num_cam + self.num_theta)]
+                generated_shapes = theta_here[:, (self.num_cam + self.num_theta):]
+                fake_shapes.append(generated_shapes)
 
-                    # Rs_wglobal is Nx24x3x3 rotation matrices of poses
-                    generated_verts, generated_joints, generated_pred_Rs = self.smpl(generated_shapes, generated_poses, get_skin=True)
-                    fake_joints.append(generated_joints)
+                # Rs_wglobal is Nx24x3x3 rotation matrices of poses
+                generated_verts, generated_joints, generated_pred_Rs = self.smpl(generated_shapes, generated_poses, get_skin=True)
+                fake_joints.append(generated_joints)
 
-                    #Calculate keypoint reprojection
-                    if self.use_kp_loss:
-                        pred_kp = batch_orth_proj_idrot(generated_joints, generated_cams,
-                                                        name='proj2d_stage%d' % i)
-                        all_pred_kps.append(pred_kp)
+                #For visualization
+                all_pred_verts.append(tf.gather(generated_verts, self.show_these))
+                all_pred_cams.append(tf.gather(generated_cams, self.show_these))
 
-                    #Calculate mesh reprojection
-                    if self.use_mesh_repro_loss:
-                        silhouette_pred = reproject_vertices(generated_verts,
-                                                             generated_cams,
-                                                             tf.constant([self.img_size, self.img_size], tf.float32),
-                                                             name='mesh_reproject_stage%d' % i)
-                        all_pred_silhouettes.append(silhouette_pred)
+                ##############################################################################################
+                # Calculate Generator Losses
+                ##############################################################################################
 
-                    ##############################################################################################
-                    # Calculate Generator Losses
-                    ##############################################################################################
+                #Calculate keypoint reprojection loss
+                if self.use_kp_loss:
+                    pred_kp = batch_orth_proj_idrot(generated_joints, generated_cams,
+                                                    name='proj2d_stage%d' % i)
+                    kp_losses.append(
+                        self.generator_kp_loss_weight * keypoint_l1_loss(kp2d_gts, pred_kp)
+                    )
+                    # For visulalization
+                    all_pred_kps.append(tf.gather(pred_kp, self.show_these))
 
-                    #Calculate keypoint reprojection loss
-                    if self.use_kp_loss:
-                        kp_losses.append(
-                            self.generator_kp_loss_weight * keypoint_l1_loss(small_kps, all_pred_kps[-1])
-                        )
+                #Calculate mesh reprojection loss
+                if self.use_mesh_repro_loss:
+                    silhouette_pred = reproject_vertices(generated_verts,
+                                                         generated_cams,
+                                                         tf.constant([self.img_size, self.img_size], tf.float32),
+                                                         name='mesh_reproject_stage%d' % i)
+                    # silhouette_gt: first entry = index sample; 
+                    #                second,third = coordinate of pixel with value > 0.
+                    silhouette_gt = tf.cast(tf.where(tf.greater(seg_gts, 0.))[:, :3], tf.float32)
 
-                    #Calculate mesh reprojection loss
-                    if self.use_mesh_repro_loss:
-                        # silhouette_gt: first entry = index sample; 
-                        #                second,third = coordinate of pixel with value > 0.
-                        silhouette_gt = tf.cast(tf.where(tf.greater(small_seg, 0.))[:, :3], tf.float32)
+                    repro_loss = mesh_reprojection_loss(
+                        silhouette_gt, silhouette_pred, self.batch_size,
+                        name='mesh_repro_loss%d' % i)
+                    repro_loss_scaled = repro_loss * self.mr_loss_weight
 
-                        repro_loss = mesh_reprojection_loss(
-                            silhouette_gt, all_pred_silhouettes[-1], self.batch_size,
-                            name='mesh_repro_loss%d' % i)
-                        repro_loss_scaled = repro_loss * self.mr_loss_weight
+                    mr_losses.append(repro_loss_scaled)
 
-                        mr_losses.append(repro_loss_scaled)
+                #Calculate 3d joint loss
+                #TODO not used atm
+                if self.use_3d_label:
+                    loss_poseshape, loss_joints = self.get_3d_loss(
+                        pred_Rs, shapes, joints)
+                    loss_3d_params.append(loss_poseshape)
+                    loss_3d_joints.append(loss_joints)
 
-                    #Calculate 3d joint loss
-                    #TODO not used atm
-                    if self.use_3d_label:
-                        loss_poseshape, loss_joints = self.get_3d_loss(
-                            pred_Rs, shapes, joints)
-                        loss_3d_params.append(loss_poseshape)
-                        loss_3d_joints.append(loss_joints)
-
-                    #Calculate ctritic loss
-                    if not self.encoder_only:
-                        kcs = get_kcs(generated_joints, self.C)
-                        generated_joints = tf.transpose(generated_joints, perm=[0,2,1])[:,:,:14]
-                        generator_critic_loss = self.critic_network([kcs,
-                                                           generated_joints,
-                                                           generated_shapes],
-                                                           training=True
-                                                         )
-                        generator_critic_loss = tf.reduce_sum(generator_critic_loss)/generator_critic_loss.shape[0]
-                        #tf.print("CRITIC LOSS", generator_critic_loss)
-                        generator_critic_losses.append(critic_loss * self.critic_loss_weight)
+                #Calculate ctritic loss
+                if not self.encoder_only:
+                    kcs = get_kcs(generated_joints, self.C)
+                    generated_joints = tf.transpose(generated_joints, perm=[0,2,1])[:,:,:14]
+                    generator_critic_loss = self.critic_network([kcs,
+                                                       generated_joints,
+                                                       generated_shapes],
+                                                       training=True
+                                                     )
+                    generator_critic_loss = tf.reduce_sum(generator_critic_loss)/generator_critic_loss.shape[0]
+                    #tf.print("CRITIC LOSS", generator_critic_loss)
+                    generator_critic_losses.append(generator_critic_loss * self.critic_loss_weight)
 
 
-                    # Save things for visualiations:
-                    #self.all_verts.append(tf.gather(verts, self.show_these))
-                    #if(not self.use_mesh_repro_loss):
-                    #self.all_pred_kps.append(tf.gather(pred_kp, self.show_these))
-                    #if(self.use_mesh_repro_loss):
-                    #    self.all_pred_silhouettes.append(tf.gather(silhouette_pred, self.show_these))
-                    #self.all_pred_cams.append(tf.gather(cams, self.show_these))
+                # Save things for visualiations:
+                #self.all_verts.append(tf.gather(verts, self.show_these))
+                #if(not self.use_mesh_repro_loss):
+                #self.all_pred_kps.append(tf.gather(pred_kp, self.show_these))
+                #if(self.use_mesh_repro_loss):
+                #    self.all_pred_silhouettes.append(tf.gather(silhouette_pred, self.show_these))
+                #self.all_pred_cams.append(tf.gather(cams, self.show_these))
 
-                    # Finally update to end iteration.
-                    theta_prev = theta_here
+                # Finally update to end iteration.
+                theta_prev = theta_here
 
-                    #theta_here = theta_prev + delta_theta
-                    #print("theta here", theta_here)
-                    #gts = tf.ones_like(theta_here)
-                    #print("gts", gts)
-                    #loss = tf.linalg.norm(theta_here-gts) # works
+                #theta_here = theta_prev + delta_theta
+                #print("theta here", theta_here)
+                #gts = tf.ones_like(theta_here)
+                #print("gts", gts)
+                #loss = tf.linalg.norm(theta_here-gts) # works
 
-                    #gt_joints = tf.ones_like(generated_joints)
-                    #gt_verts = tf.ones_like(generated_verts)
-                    # loss = tf.linalg.norm(generated_joints-gt_joints) + tf.linalg.norm(generated_verts-gt_verts) # works
+                #gt_joints = tf.ones_like(generated_joints)
+                #gt_verts = tf.ones_like(generated_verts)
+                # loss = tf.linalg.norm(generated_joints-gt_joints) + tf.linalg.norm(generated_verts-gt_verts) # works
 
-                    #kp_gt = tf.ones_like(pred_kp)
-                    #loss = tf.linalg.norm(pred_kp-kp_gt) # works
+                #kp_gt = tf.ones_like(pred_kp)
+                #loss = tf.linalg.norm(pred_kp-kp_gt) # works
 
-                    #loss = self.generator_kp_loss_weight * keypoint_l1_loss(small_kps, pred_kp) # works
+                #loss = self.generator_kp_loss_weight * keypoint_l1_loss(small_kps, pred_kp) # works
 
             #loss = kp_losses[-1]
             #print(loss)
@@ -461,7 +453,7 @@ class HMRTrainer(object):
             #tf.print("APPLIED GRADIENTS GENERATOR =)")
             #print("step %g: time %g, generator_loss: %.4f" %(step, 0, generator_loss))
 
-            self.global_step = self.global_step + 1
+            #self.global_step = self.global_step + 1
         #############################################################################################
         # Critic update
         #############################################################################################
@@ -471,12 +463,12 @@ class HMRTrainer(object):
                 num_joints = 14
                 all_fake_joints = tf.concat(fake_joints, 0)
                 all_fake_shapes = tf.concat(fake_shapes, 0)
-                tf.print('real_joints', joint3d_gt)
-                tf.print('real_shapes', shape_gts)
-                tf.print('fake_joints', fake_joints)
-                tf.print('fake_shapes', fake_shapes)
-                tf.print('all_fake_joints', all_fake_joints)
-                tf.print('all_fake_shapes', all_fake_shapes)
+                #tf.print('real_joints', joint3d_gt)
+                #tf.print('real_shapes', shape_gts)
+                #tf.print('fake_joints', fake_joints)
+                #tf.print('fake_shapes', fake_shapes)
+                #tf.print('all_fake_joints', all_fake_joints)
+                #tf.print('all_fake_shapes', all_fake_shapes)
 
                 real_kcs = get_kcs(joint3d_gt, self.C)
                 real_output = self.critic_network([real_kcs, joint3d_gt[:,:num_joints,:], shape_gts], training=True)
@@ -493,19 +485,29 @@ class HMRTrainer(object):
                                                             self.critic_network.trainable_variables)
             self.critic_optimizer.apply_gradients(zip(gradients_of_discriminator,
                                                         self.critic_network.trainable_variables))
-            tf.print("variables critic network length:", len(self.critic_network.trainable_variables))
-            tf.print("gradients critic length:", len(gradients_of_discriminator))
-            tf.print("critic network loss:", critic_network_loss)
-            tf.print("APPLIED GRADIENTS CRITIC :-)")
+            #tf.print("variables critic network length:", len(self.critic_network.trainable_variables))
+            #tf.print("gradients critic length:", len(gradients_of_discriminator))
+            #tf.print("critic network loss:", critic_network_loss)
+            #tf.print("APPLIED GRADIENTS CRITIC :-)")
             #print("step %g: time %g, generator_loss: %.4f" %(step, 0, critic_network_loss))
 
-            ######  ######################################################################################
-            # Write Critic update to tensorboard
-            ############################################################################################
-            with self.critic_writer.as_default():
-                tf.summary.scalar('critic_network_loss', critic_network_loss,
-                                             step=self.global_step)
-                self.critic_writer.flush()
+
+        #################################################################################################
+        # Return results
+        #################################################################################################
+        result = {}
+        all_pred_verts = tf.stack(all_pred_verts, axis=1)
+        all_pred_kps = tf.stack(all_pred_kps, axis=1)
+        all_pred_cams = tf.stack(all_pred_cams, axis=1)
+        result["generated_cams"] = all_pred_cams
+        result["generated_verts"] = all_pred_verts
+        result["generated_kps"] = all_pred_kps
+        result["kp_losses"] = kp_losses
+        result["mr_losses"] = mr_losses
+        if not self.encoder_only:
+            result["critic_network_loss"] = critic_network_loss
+
+        return result
 
     def visualize_img(self, img, gt_kp, vert, pred_kp, cam, renderer, seg_gt=None):
         """
@@ -513,7 +515,7 @@ class HMRTrainer(object):
         Draws vert with text.
         Renderer is an instance of SMPLRenderer.
         """
-        gt_vis = tf.cast(gt_kp[:, 2], tf.bool)
+        gt_vis = gt_kp[:, 2].astype(bool)
         loss = np.sum((gt_kp[gt_vis, :2] - pred_kp[gt_vis])**2)
         debug_text = {"sc": cam[0], "tx": cam[1], "ty": cam[2], "kpl": loss}
         # Fix a flength so i can render this with persp correct scale
@@ -543,10 +545,17 @@ class HMRTrainer(object):
             combined = np.hstack([skel_img, rend_img / 255.])
         return combined
 
-    def draw_results(self, imgs, segs_gt, gt_kps, est_verts, joints, cam, step, writer):
+    def draw_results(self, imgs, segs_gt, gt_kps, est_verts, pred_kps, cam, step, writer):
         import io
         import matplotlib.pyplot as plt
         import cv2
+
+        imgs = imgs.numpy()
+        segs_gt = segs_gt.numpy()
+        gt_kps = gt_kps.numpy()
+        est_verts = est_verts.numpy()
+        pred_kps = pred_kps.numpy()
+        cam = cam.numpy()
 
         if self.data_format == 'NCHW':
             imgs = np.transpose(imgs, [0, 2, 3, 1])
@@ -556,11 +565,11 @@ class HMRTrainer(object):
         if not self.use_mesh_repro_loss:
             segs_gt = np.empty_like(imgs)
 
-        for img_id, (img, seg_gt, gt_kp, verts, joints, cams) in enumerate(
-                zip(imgs, segs_gt, gt_kps, est_verts, joints, cam)):
+        for img_id, (img, seg_gt, gt_kp, verts, keypoints, cams) in enumerate(
+                zip(imgs, segs_gt, gt_kps, est_verts, pred_kps, cam)):
             # verts, joints, cams are a list of len T.
             all_rend_imgs = []
-            for vert, joint, cam in zip(verts, joints, cams):
+            for vert, joint, cam in zip(verts, keypoints, cams):
 
                 if(self.use_mesh_repro_loss):
                     rend_img = self.visualize_img(img, gt_kp, vert, joint, cam,
@@ -571,17 +580,20 @@ class HMRTrainer(object):
                 all_rend_imgs.append(rend_img)
             combined = np.vstack(all_rend_imgs)
 
-            sio = io.BytesIO()
+            buf = io.BytesIO()
 
-            plt.imsave(sio, combined, format='png')
-            sio.seek(0)
+            plt.imsave(buf, combined, format='png')
+            buf.seek(0)
 
-            with writer.as_default():
-                tf.print("img_summaries.append")
-                writer.image(("vis_images/%d" % img_id), vis_sum, step=self.global_step)
+            # Convert PNG buffer to TF image
+            image = tf.image.decode_png(buf.getvalue(), channels=4)
+            # Add the batch dimension
+            image = tf.expand_dims(image, 0)
 
-            sio.flush()
-            sio.close()
+            tf.summary.image(("vis_images/%d" % img_id), image, step=step)
+
+            buf.flush()
+            buf.close()
             plt.close()
 
     def train(self):
@@ -591,6 +603,7 @@ class HMRTrainer(object):
         print('...')
         self.mean_var = self.load_mean_param()
         self.global_step = tf.Variable(1, name='global_step', trainable=False, dtype=tf.int64)
+        step = tf.Variable(1, name='step', trainable=False, dtype=tf.int64)
         for epoch in range(self.max_epoch):
 
             itr = 0
@@ -606,34 +619,45 @@ class HMRTrainer(object):
                 tf.summary.trace_on(graph=True, profiler=False)
 
                 start_time = time.time()
-                result = self.train_step(images, segmentations, keypoints, joints, shapes)
+                result = self.train_step(images, segmentations, keypoints, joints, shapes, step)
                 end_time = time.time()
 
+                step = step + 1
                 ############################################################################################
                 # Write Generator update to tensorboard
                 ############################################################################################
 
                 with self.generator_writer.as_default():
                     if self.use_kp_loss:
-                        tf.summary.scalar('kp_loss', kp_losses[-1], step=self.global_step)
+                        tf.summary.scalar('kp_loss', result["kp_losses"][-1], step=step)
                     if self.use_mesh_repro_loss:
-                        tf.summary.scalar('mr_loss', mr_losses[-1], step=self.global_step)
-                    print((self.global_step % self.log_img_step))
-                    print(tf.constant(0, dtype=tf.int64))
-                    if tf.equal((self.global_step % self.log_img_step), tf.constant(0, dtype=tf.int64)):
+                        tf.summary.scalar('mr_loss', result["mr_losses"][-1], step=step)
+                    print((step % self.log_img_step))
+                    if tf.equal((step % self.log_img_step), tf.constant(0, dtype=tf.int64)):
+                        show_images = tf.gather(images, self.show_these)
+                        show_segs = tf.gather(segmentations, self.show_these)
+                        show_kps = tf.gather(keypoints, self.show_these)
                         print("drawing images now")
-                        self.draw_results(small_images, small_seg, small_kps, generated_verts,
-                                          generated_joints, generated_cams, self.global_step,
-                                         self.generator_writer)
+                        self.draw_results(show_images, show_segs, show_kps,
+                                          result["generated_verts"], result["generated_kps"],
+                                          result["generated_cams"], step, self.generator_writer)
                     self.generator_writer.flush()
 
-
                 print("one step took", (end_time - start_time), "seconds")
-                writer = tf.summary.create_file_writer('simple_logs/auto_test4')
+                writer = tf.summary.create_file_writer('simple_logs/auto_test6')
                 with writer.as_default():
                   tf.summary.trace_export(
                       name="my_func_trace",
                       step=0)
+
+                ##############################################################################################
+                # Write Critic update to tensorboard
+                ############################################################################################
+                if not self.encoder_only:
+                    with self.critic_writer.as_default():
+                        tf.summary.scalar('critic_network_loss', result["critic_network_loss"],
+                                                 step=step)
+                        self.critic_writer.flush()
 
                 itr += self.num_gen_steps_per_itr
                 print("itr", itr, "/", self.num_itr_per_epoch)
