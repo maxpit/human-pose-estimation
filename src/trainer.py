@@ -183,7 +183,7 @@ class HMRTrainer(object):
             critic_dataset = critic_dataset.batch(self.batch_size*3)
             self.full_dataset.append(critic_dataset)
         else:
-            self.full_dataset.append(tf.data.Dataset.range(2000))
+            self.full_dataset.append(tf.data.Dataset.range(2000).repeat())
         # create one dataset so its easier to iterate over it
         self.full_dataset = tf.data.Dataset.zip(tuple(self.full_dataset))
 
