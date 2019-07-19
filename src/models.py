@@ -377,7 +377,7 @@ def get_kcs(joints, C_matrix, num_joints=14):
     kcs = tf.transpose(kcs_diag, [2, 0, 1])
     return kcs
 
-def Critic_network(num_joints=14):
+def Critic_network(num_joints=14, use_rotation=False):
     # TODO: Check whether LSP order = our order !!!
     """
     Critic network adapted from
@@ -407,11 +407,20 @@ def Critic_network(num_joints=14):
     if(num_joints == 14):
         kcs_input_shape = (13, 13)
         joints_input_shape = (14, 3)
+        rotation_input_shape = (23, 3, 3)
     elif(num_joints == 19):
         kcs_input_shape = (18, 18)
         joints_input_shape = (19, 3)
+        rotation_input_shape = (23, 3, 3)
     else:
-        kcs_input_shape, joints_input_shape = None
+        kcs_input_shape, joints_input_shape, rotation_input_shape = None
+
+    if use_rotation:
+        rotiation_input = layers.input(shape=rotation_input_shape, name="rotation_in")
+        rotation_out = layers.Flatten()(rotiation_input)
+        rotation_out = layers.Dense(300, activation=tf.nn.leaky_relu, name="rotation_dense_1")(rotation_out)
+        rotation_out = layers.Dense(100, activation=tf.nn.leaky_relu, name="rotation_dense_2")(rotation_out)
+        rotation_out = layers.Dense(1, activation=None, name="rotation_dense_3")(rotation_out)
 
     kcs_input = layers.Input(shape=kcs_input_shape, name="kcs_in")
     kcs_out = layers.Flatten()(kcs_input)
@@ -429,9 +438,15 @@ def Critic_network(num_joints=14):
     shapes_out = layers.Dense(5, activation='relu', name="shapes_dense_2")(shapes_out)
     shapes_out = layers.Dense(1, name="shapes_dense_3")(shapes_out)
 
-    critic_out = tf.concat([critic_joints_out, shapes_out], 1)
+    if use_rotation:
+        critic_out = tf.concat([critic_joints_out, shapes_out, rotation_out], 1)
+    else:
+        critic_out = tf.concat([critic_joints_out, shapes_out], 1)
 
-    model = keras.models.Model(inputs=[kcs_input, joints_input, shapes_input], outputs=critic_out)
+    if use_rotation:
+        model = keras.models.Model(inputs=[kcs_input, joints_input, shapes_input, rotiation_input], outputs=critic_out)
+    else:
+        model = keras.models.Model(inputs=[kcs_input, joints_input, shapes_input], outputs=critic_out)
     return model
 
 ###########################################
