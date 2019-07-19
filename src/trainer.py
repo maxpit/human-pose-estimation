@@ -58,7 +58,7 @@ class HMRTrainer(object):
         self.pretrained_model_path = config.pretrained_model_path
         self.encoder_only = config.encoder_only
         self.use_3d_label = config.use_3d_label
-
+        self.use_rotation = config.use_rotation
         # Data size
         self.img_size = config.img_size
         #print(self.img_size)
@@ -92,7 +92,7 @@ class HMRTrainer(object):
 
         self.use_gradient_penalty = config.use_gradient_penalty
         self.num_joints = 14
-        self.do_bone_evaluation = True
+        self.do_bone_evaluation = False
 
         #######################################################################################
         # Calculate necessary information
@@ -203,7 +203,7 @@ class HMRTrainer(object):
         # Load models
         self.image_feature_extractor = Encoder_resnet()
         self.generator3d = Encoder_fc3_dropout()
-        self.critic_network = Critic_network()
+        self.critic_network = Critic_network(use_rotation=self.use_rotation)
 
     def use_pretrained(self):
         """
@@ -318,6 +318,7 @@ class HMRTrainer(object):
 
                 # Rs_wglobal is Nx24x3x3 rotation matrices of poses
                 generated_verts, generated_joints, generated_pred_Rs = self.smpl(generated_shapes, generated_poses, get_skin=True)
+                generated_pred_Rs = generated_pred_Rs[:,1:,:]
                 fake_joints.append(generated_joints)
 
                 #For visualization
@@ -474,6 +475,7 @@ class HMRTrainer(object):
         if not self.encoder_only:
             with tf.GradientTape() as critic_tape:
                 all_fake_joints = tf.concat(fake_joints, 0)[:,:self.num_joints,:]
+                all_fake_Rs = tf.concat(all_fake_Rs, 0)
                 all_fake_shapes = tf.concat(fake_shapes, 0)
                 joint3d_gt = joint3d_gt[:,:self.num_joints,:]
                 #tf.print('real_joints', joint3d_gt)
@@ -584,11 +586,11 @@ class HMRTrainer(object):
             result["critic_network_loss"] = critic_network_loss
 
         if self.do_bone_evaluation:
-            bones_pred = tf.diag_part(get_kcs(all_fake_joints, self.C))
+            bones_pred = tf.linalg.diag_part(get_kcs(all_fake_joints, self.C))
             avg_total_bone_length_pred = tf.reduce_mean(tf.reduce_sum(bones_pred, axis=1))
             result["avg_total_bone_length_pred"] = avg_total_bone_length_pred
 
-            bones_gt = tf.diag_part(get_kcs(joint3d_gt, self.C))
+            bones_gt = tf.linalg.diag_part(get_kcs(joint3d_gt, self.C))
             avg_total_bone_length_gt = tf.reduce_mean(tf.reduce_sum(bones_gt, axis=1))
             result["avg_total_bone_length_gt"] = avg_total_bone_length_gt
 
@@ -697,14 +699,16 @@ class HMRTrainer(object):
             for data_gen, data_critic in self.full_dataset:
                 images, segmentations, keypoints = data_gen
                 if not self.encoder_only:
-                    joints, shapes = data_critic
+                    joints, shapes, rotations = data_critic
                     joints = tf.squeeze(joints, axis=1)
                 else:
                     joints = None
+                    rotations = None
                     shapes = None
 
                 start_time = time.time()
-                result = self.train_step(images, segmentations, keypoints, joints, shapes, Rs, step)
+                result = self.train_step(images, segmentations, keypoints, joints, shapes,
+                                         tf.squeeze(rotations)[:,1:,:], step)
                 end_time = time.time()
 
                 step = step + 1

@@ -416,8 +416,8 @@ def Critic_network(num_joints=14, use_rotation=False):
         kcs_input_shape, joints_input_shape, rotation_input_shape = None
 
     if use_rotation:
-        rotiation_input = layers.input(shape=rotation_input_shape, name="rotation_in")
-        rotation_out = layers.Flatten()(rotiation_input)
+        rotation_input = layers.Input(shape=rotation_input_shape, name="rotation_in")
+        rotation_out = layers.Flatten()(rotation_input)
         rotation_out = layers.Dense(300, activation=tf.nn.leaky_relu, name="rotation_dense_1")(rotation_out)
         rotation_out = layers.Dense(100, activation=tf.nn.leaky_relu, name="rotation_dense_2")(rotation_out)
         rotation_out = layers.Dense(1, activation=None, name="rotation_dense_3")(rotation_out)
@@ -444,7 +444,7 @@ def Critic_network(num_joints=14, use_rotation=False):
         critic_out = tf.concat([critic_joints_out, shapes_out], 1)
 
     if use_rotation:
-        model = keras.models.Model(inputs=[kcs_input, joints_input, shapes_input, rotiation_input], outputs=critic_out)
+        model = keras.models.Model(inputs=[kcs_input, joints_input, shapes_input, rotation_input], outputs=critic_out)
     else:
         model = keras.models.Model(inputs=[kcs_input, joints_input, shapes_input], outputs=critic_out)
     return model
