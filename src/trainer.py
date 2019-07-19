@@ -250,7 +250,7 @@ class HMRTrainer(object):
     # Notice the use of `tf.function`
     # This annotation causes the function to be "compiled".
     @tf.function
-    def train_step(self, images, seg_gts, kp2d_gts, joint3d_gt, shape_gts, step):
+    def train_step(self, images, seg_gts, kp2d_gts, joint3d_gt, shape_gts, Rs_gt, step):
         print("not autographed")
 
         #############################################################################################
@@ -284,6 +284,7 @@ class HMRTrainer(object):
         all_pred_kps = []
         all_pred_silhouettes = []
         generator_critic_losses = []
+        all_fake_Rs = []
 
         with tf.GradientTape() as gen_tape:
             #Extract feature vector from image using resnet
@@ -364,18 +365,19 @@ class HMRTrainer(object):
 
                 #Calculate ctritic loss
                 if not self.encoder_only:
+                    all_fake_Rs.append(generated_pred_Rs)
                     kcs = get_kcs(generated_joints, self.C)
                     #generated_joints = tf.transpose(generated_joints, perm=[0,2,1])[:,:,:self.num_joints]
                     generator_critic_out = self.critic_network([kcs,
                                                        generated_joints[:,:self.num_joints,:],
-                                                       generated_shapes],
+                                                       generated_shapes,
+                                                       generated_pred_Rs],
                                                        training=False
                                                      )
 
                     generator_critic_loss = - tf.reduce_sum(tf.reduce_mean(generator_critic_out, 0))
                     #tf.print("CRITIC LOSS", generator_critic_loss)
                     generator_critic_losses.append(generator_critic_loss * self.critic_loss_weight)
-
 
                 # Save things for visualiations:
                 #self.all_verts.append(tf.gather(verts, self.show_these))
@@ -482,12 +484,13 @@ class HMRTrainer(object):
                 #tf.print('all_fake_shapes', all_fake_shapes)
 
                 real_kcs = get_kcs(joint3d_gt, self.C)
-                real_output = self.critic_network([real_kcs, joint3d_gt, shape_gts], training=True)
+                real_output = self.critic_network([real_kcs, joint3d_gt, shape_gts, Rs_gt], training=True)
 
                 fake_kcs = get_kcs(all_fake_joints, self.C)
                 fake_output = self.critic_network([fake_kcs,
                                                    all_fake_joints,
-                                                   all_fake_shapes],
+                                                   all_fake_shapes,
+                                                   all_fake_Rs],
                                                    training=True)
 
                 ##########################################
@@ -502,35 +505,41 @@ class HMRTrainer(object):
                 if self.use_gradient_penalty:
                     alpha = tf.random.uniform(all_fake_joints.shape)
                     beta = tf.random.uniform(all_fake_shapes.shape)
+                    gamma = tf.random.uniform(all_fake_Rs.shape)
                     interpolated_joints = all_fake_joints + alpha * (joint3d_gt - all_fake_joints)
                     interpolated_kcs = get_kcs(all_fake_joints, self.C)
                     interpolated_shapes = all_fake_shapes + beta * (shape_gts - all_fake_shapes)
+                    interpolated_Rs = all_fake_Rs + gamma * (Rs_gt - all_fake_Rs)
                     out_interpolated = self.critic_network([interpolated_kcs,
                                                             interpolated_joints[:, :self.num_joints, :],
-                                                            interpolated_shapes],
+                                                            interpolated_shapes,
+                                                            interpolated_Rs],
                                                            training=True)
                     gradients_to_penalize = tf.gradients(ys=out_interpolated,
                                                          xs=[interpolated_kcs,
                                                              interpolated_joints,
-                                                             interpolated_shapes])
+                                                             interpolated_shapes,
+                                                             interpolated_Rs])
                     #tf.print("out_interpolated", out_interpolated.shape)
                     #tf.print("gradients", len(gradients_to_penalize))
                     #tf.print("gradients[0]", gradients_to_penalize[0].shape)
                     #tf.print("gradients[1]", gradients_to_penalize[1].shape)
                     #tf.print("gradients[2]", gradients_to_penalize[2].shape)
-                    tf.print("gradients[0].norm",
-                             tf.norm(tf.reduce_mean(gradients_to_penalize[0]), ord='euclidean'))
-                    tf.print("gradients[1].norm",
-                             tf.norm(tf.reduce_mean(gradients_to_penalize[1]), ord='euclidean'))
-                    tf.print("gradients[2].norm",
-                             tf.norm(tf.reduce_mean(gradients_to_penalize[2]), ord='euclidean'))
+                    #tf.print("gradients[0].norm",
+                    #         tf.norm(tf.reduce_mean(gradients_to_penalize[0]), ord='euclidean'))
+                    #tf.print("gradients[1].norm",
+                    #         tf.norm(tf.reduce_mean(gradients_to_penalize[1]), ord='euclidean'))
+                    #tf.print("gradients[2].norm",
+                    #         tf.norm(tf.reduce_mean(gradients_to_penalize[2]), ord='euclidean'))
                     penalty_1 = tf.square(
                         1. - tf.norm(tf.reduce_mean(gradients_to_penalize[0], 0), ord='euclidean'))
                     penalty_2 = tf.square(
                         1. - tf.norm(tf.reduce_mean(gradients_to_penalize[1], 0), ord='euclidean'))
                     penalty_3 = tf.square(
                         1. - tf.norm(tf.reduce_mean(gradients_to_penalize[2], 0), ord='euclidean'))
-                    penalty = (penalty_1 + penalty_2 + penalty_3)
+                    penalty_4 = tf.square(
+                        1. - tf.norm(tf.reduce_mean(gradients_to_penalize[3], 0), ord='euclidean'))
+                    penalty = (penalty_1 + penalty_2 + penalty_3 + penalty_4)
                     #tf.print("penalty", penalty)
 
                     #critic_network_loss.append(penalty)
@@ -695,7 +704,7 @@ class HMRTrainer(object):
                     shapes = None
 
                 start_time = time.time()
-                result = self.train_step(images, segmentations, keypoints, joints, shapes, step)
+                result = self.train_step(images, segmentations, keypoints, joints, shapes, Rs, step)
                 end_time = time.time()
 
                 step = step + 1
