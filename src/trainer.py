@@ -90,6 +90,9 @@ class HMRTrainer(object):
         self.generator_lr = config.generator_lr
         self.critic_lr = config.critic_lr
 
+        self.use_gradient_penalty = config.use_gradient_penalty
+        self.num_joints = 14
+
         #######################################################################################
         # Calculate necessary information
         #######################################################################################
@@ -194,6 +197,7 @@ class HMRTrainer(object):
         # Initialize optimizers
         self.generator_optimizer = tf.keras.optimizers.Adam(self.generator_lr)
         self.critic_optimizer = tf.keras.optimizers.RMSprop(self.critic_lr)
+        #self.critic_optimizer = tf.keras.optimizers.Adam(self.critic_lr)
 
         # Load models
         self.image_feature_extractor = Encoder_resnet()
@@ -360,13 +364,14 @@ class HMRTrainer(object):
                 #Calculate ctritic loss
                 if not self.encoder_only:
                     kcs = get_kcs(generated_joints, self.C)
-                    generated_joints = tf.transpose(generated_joints, perm=[0,2,1])[:,:,:14]
-                    generator_critic_loss = self.critic_network([kcs,
-                                                       generated_joints,
+                    #generated_joints = tf.transpose(generated_joints, perm=[0,2,1])[:,:,:self.num_joints]
+                    generator_critic_out = self.critic_network([kcs,
+                                                       generated_joints[:,:self.num_joints,:],
                                                        generated_shapes],
-                                                       training=True
+                                                       training=False
                                                      )
-                    generator_critic_loss = tf.reduce_sum(generator_critic_loss)/generator_critic_loss.shape[0]
+
+                    generator_critic_loss = - tf.reduce_sum(tf.reduce_mean(generator_critic_out, 0))
                     #tf.print("CRITIC LOSS", generator_critic_loss)
                     generator_critic_losses.append(generator_critic_loss * self.critic_loss_weight)
 
@@ -437,32 +442,37 @@ class HMRTrainer(object):
             #tf.print("variables mean va", self.mean_var)
             #tf.print("variables len", len(variables))
 
-            generator_loss_sum = []
+            generator_loss_sum = 0.
             if self.use_kp_loss:
-                generator_loss_sum.append(kp_losses[-1])
+                #generator_loss_sum.append(kp_losses[-1])
+                generator_loss_sum += kp_losses[-1]
             if self.use_mesh_repro_loss:
-                generator_loss_sum.append(mr_losses[-1])
+                generator_loss_sum += mr_losses[-1]
             if not self.encoder_only:
-                generator_loss_sum.append(generator_critic_losses[-1])
+                generator_loss_sum += generator_critic_losses[-1]
+                pass
 
             #tf.print("gen loss sum", generator_loss_sum)
             gradients_of_generator = gen_tape.gradient(generator_loss_sum, variables)
             #tf.print("gradients generator length", len(gradients_of_generator))
             self.generator_optimizer.apply_gradients(zip(gradients_of_generator, variables))
 
+
             #tf.print("APPLIED GRADIENTS GENERATOR =)")
             #print("step %g: time %g, generator_loss: %.4f" %(step, 0, generator_loss))
 
             #self.global_step = self.global_step + 1
+
         #############################################################################################
         # Critic update
         #############################################################################################
 
+        #critic_network_loss = []
         if not self.encoder_only:
             with tf.GradientTape() as critic_tape:
-                num_joints = 14
-                all_fake_joints = tf.concat(fake_joints, 0)
+                all_fake_joints = tf.concat(fake_joints, 0)[:,:self.num_joints,:]
                 all_fake_shapes = tf.concat(fake_shapes, 0)
+                joint3d_gt = joint3d_gt[:,:self.num_joints,:]
                 #tf.print('real_joints', joint3d_gt)
                 #tf.print('real_shapes', shape_gts)
                 #tf.print('fake_joints', fake_joints)
@@ -471,15 +481,64 @@ class HMRTrainer(object):
                 #tf.print('all_fake_shapes', all_fake_shapes)
 
                 real_kcs = get_kcs(joint3d_gt, self.C)
-                real_output = self.critic_network([real_kcs, joint3d_gt[:,:num_joints,:], shape_gts], training=True)
+                real_output = self.critic_network([real_kcs, joint3d_gt, shape_gts], training=True)
 
                 fake_kcs = get_kcs(all_fake_joints, self.C)
-                fake_output = self.critic_network([fake_kcs, all_fake_joints[:,:num_joints,:],
-                                                  all_fake_shapes],
-                                                  training=True)
+                fake_output = self.critic_network([fake_kcs,
+                                                   all_fake_joints,
+                                                   all_fake_shapes],
+                                                   training=True)
 
-                critic_network_loss = -(tf.reduce_sum(real_output - fake_output)/real_output.shape[0])
-                #print("critic_network_loss:", critic_network_loss)
+                ##########################################
+                ### Try WGAN loss                      ###
+                ##########################################
+                #fake_output = -fake_output
+                #critic_network_loss = tf.reduce_sum(real_output * fake_output)/real_output.shape[0]
+
+                #critic_network_loss.append(tf.reduce_sum(tf.reduce_mean(fake_output - real_output, 0)))
+                critic_network_loss = tf.reduce_sum(tf.reduce_mean(fake_output - real_output, 0))
+
+                if self.use_gradient_penalty:
+                    alpha = tf.random.uniform(all_fake_joints.shape)
+                    beta = tf.random.uniform(all_fake_shapes.shape)
+                    interpolated_joints = all_fake_joints + alpha * (joint3d_gt - all_fake_joints)
+                    interpolated_kcs = get_kcs(all_fake_joints, self.C)
+                    interpolated_shapes = all_fake_shapes + beta * (shape_gts - all_fake_shapes)
+                    out_interpolated = self.critic_network([interpolated_kcs,
+                                                            interpolated_joints[:, :self.num_joints, :],
+                                                            interpolated_shapes],
+                                                           training=True)
+                    gradients_to_penalize = tf.gradients(ys=out_interpolated,
+                                                         xs=[interpolated_kcs,
+                                                             interpolated_joints,
+                                                             interpolated_shapes])
+                    tf.print("out_interpolated", out_interpolated.shape)
+                    tf.print("gradients", len(gradients_to_penalize))
+                    tf.print("gradients[0]", gradients_to_penalize[0].shape)
+                    tf.print("gradients[1]", gradients_to_penalize[1].shape)
+                    tf.print("gradients[2]", gradients_to_penalize[2].shape)
+                    tf.print("gradients[0].norm",
+                             tf.norm(tf.reduce_mean(gradients_to_penalize[0]), ord='euclidean'))
+                    tf.print("gradients[1].norm",
+                             tf.norm(tf.reduce_mean(gradients_to_penalize[1]), ord='euclidean'))
+                    tf.print("gradients[2].norm",
+                             tf.norm(tf.reduce_mean(gradients_to_penalize[2]), ord='euclidean'))
+                    penalty_1 = tf.square(
+                        1. - tf.norm(tf.reduce_mean(gradients_to_penalize[0], 0), ord='euclidean'))
+                    penalty_2 = tf.square(
+                        1. - tf.norm(tf.reduce_mean(gradients_to_penalize[1], 0), ord='euclidean'))
+                    penalty_3 = tf.square(
+                        1. - tf.norm(tf.reduce_mean(gradients_to_penalize[2], 0), ord='euclidean'))
+                    penalty = 10. * (penalty_1 + penalty_2 + penalty_3)
+                    tf.print("penalty", penalty)
+
+                    #critic_network_loss.append(penalty)
+                    critic_network_loss = critic_network_loss + penalty
+                ##########################################
+                ##########################################
+                tf.print("critic_network_loss:", critic_network_loss)
+
+                #critic_network_loss = -(tf.reduce_sum(real_output - fake_output) / real_output.shape[0])
 
             gradients_of_discriminator = critic_tape.gradient(critic_network_loss,
                                                             self.critic_network.trainable_variables)
@@ -496,14 +555,19 @@ class HMRTrainer(object):
         # Return results
         #################################################################################################
         result = {}
-        all_pred_verts = tf.stack(all_pred_verts, axis=1)
-        all_pred_kps = tf.stack(all_pred_kps, axis=1)
+
+
+        if self.use_kp_loss:
+            all_pred_kps = tf.stack(all_pred_kps, axis=1)
+            result["generated_kps"] = all_pred_kps
+            result["kp_losses"] = kp_losses
+        if self.use_mesh_repro_loss:
+            all_pred_verts = tf.stack(all_pred_verts, axis=1)
+            result["generated_verts"] = all_pred_verts
+            result["mr_losses"] = mr_losses
         all_pred_cams = tf.stack(all_pred_cams, axis=1)
         result["generated_cams"] = all_pred_cams
-        result["generated_verts"] = all_pred_verts
-        result["generated_kps"] = all_pred_kps
-        result["kp_losses"] = kp_losses
-        result["mr_losses"] = mr_losses
+
         if not self.encoder_only:
             result["critic_network_loss"] = critic_network_loss
 
@@ -627,10 +691,12 @@ class HMRTrainer(object):
             ############################################################################################
 
             with self.generator_writer.as_default():
+
                 if self.use_kp_loss:
                     tf.summary.scalar('kp_loss', result["kp_losses"][-1], step=step)
                 if self.use_mesh_repro_loss:
                     tf.summary.scalar('mr_loss', result["mr_losses"][-1], step=step)
+
                 if tf.equal((step % self.log_img_step), tf.constant(0, dtype=tf.int64)):
                     show_images = tf.gather(images, self.show_these)
                     show_segs = tf.gather(segmentations, self.show_these)
@@ -639,6 +705,7 @@ class HMRTrainer(object):
                     self.draw_results(show_images, show_segs, show_kps,
                                       result["generated_verts"], result["generated_kps"],
                                       result["generated_cams"], step, self.generator_writer)
+
                 self.generator_writer.flush()
 
             print("one step took", (end_time - start_time), "seconds")
@@ -654,7 +721,13 @@ class HMRTrainer(object):
             if not self.encoder_only:
                 with self.critic_writer.as_default():
                     tf.summary.scalar('critic_network_loss', result["critic_network_loss"],
+                                      step=step)
+                    '''
+                    tf.summary.scalar('wgan_loss', result["critic_network_loss"][0],
                                              step=step)
+                    tf.summary.scalar('wgan_gradient_penalty', result["critic_network_loss"][1],
+                                      step=step)
+                    '''
                     self.critic_writer.flush()
 
             itr += self.num_gen_steps_per_itr
