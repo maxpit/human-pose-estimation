@@ -127,7 +127,7 @@ class DataLoader(object):
         print('preprocess_poses with pose', pose, 'and shape', shape)
         verts, joints, rotations = self.smpl(tf.expand_dims(shape,0), pose, get_skin=True)
 
-        return joints, shape
+        return joints, shape, rotations
 
     def read_data(self, filenames):
         print(filenames)
