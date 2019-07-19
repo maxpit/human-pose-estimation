@@ -327,14 +327,14 @@ class HMRTrainer(object):
                 ##############################################################################################
 
                 #Calculate keypoint reprojection loss
-                if self.use_kp_loss:
-                    pred_kp = batch_orth_proj_idrot(generated_joints, generated_cams,
+                pred_kp = batch_orth_proj_idrot(generated_joints, generated_cams,
                                                     name='proj2d_stage%d' % i)
+                # For visulalization
+                all_pred_kps.append(tf.gather(pred_kp, self.show_these))
+                if self.use_kp_loss:
                     kp_losses.append(
                         self.generator_kp_loss_weight * keypoint_l1_loss(kp2d_gts, pred_kp)
                     )
-                    # For visulalization
-                    all_pred_kps.append(tf.gather(pred_kp, self.show_these))
 
                 #Calculate mesh reprojection loss
                 if self.use_mesh_repro_loss:
@@ -558,11 +558,11 @@ class HMRTrainer(object):
 
 
         if self.use_kp_loss:
-            all_pred_kps = tf.stack(all_pred_kps, axis=1)
-            result["generated_kps"] = all_pred_kps
             result["kp_losses"] = kp_losses
         if self.use_mesh_repro_loss:
             result["mr_losses"] = mr_losses
+        all_pred_kps = tf.stack(all_pred_kps, axis=1)
+        result["generated_kps"] = all_pred_kps
         all_pred_cams = tf.stack(all_pred_cams, axis=1)
         all_pred_verts = tf.stack(all_pred_verts, axis=1)
         result["generated_verts"] = all_pred_verts
