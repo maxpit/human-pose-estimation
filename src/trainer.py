@@ -25,6 +25,7 @@ import time
 from datetime import datetime
 import tensorflow as tf
 import numpy as np
+import os
 
 from tensorflow.python.ops import resources
 from tensorflow.python.ops import variables
@@ -204,6 +205,14 @@ class HMRTrainer(object):
         self.image_feature_extractor = Encoder_resnet()
         self.generator3d = Encoder_fc3_dropout()
         self.critic_network = Critic_network(use_rotation=self.use_rotation)
+
+        self.checkpoint_dir = './training_checkpoints'
+        self.checkpoint_prefix = os.path.join(self.checkpoint_dir, "ckpt")
+        self.checkpoint = tf.train.Checkpoint(generator_optimizer=self.generator_optimizer,
+                                         discriminator_optimizer=self.critic_optimizer,
+                                         feature_extractor=self.image_feature_extractor,
+                                         generator3d=self.generator3d,
+                                         discriminator=self.critic_network)
 
     def use_pretrained(self):
         """
@@ -757,6 +766,8 @@ class HMRTrainer(object):
                 if itr >= self.num_itr_per_epoch:
                     itr = 0
                     epoch += 1
+
+                    self.checkpoint.save(self.checkpoint_prefix)
 
                     if epoch >= self.max_epoch:
                         break
