@@ -92,6 +92,7 @@ class HMRTrainer(object):
 
         self.use_gradient_penalty = config.use_gradient_penalty
         self.num_joints = 14
+        self.do_bone_evaluation = True
 
         #######################################################################################
         # Calculate necessary information
@@ -573,6 +574,16 @@ class HMRTrainer(object):
             result["critic_penalty"] = penalty
             result["critic_network_loss"] = critic_network_loss
 
+        if self.do_bone_evaluation:
+            bones_pred = tf.diag_part(get_kcs(all_fake_joints, self.C))
+            avg_total_bone_length_pred = tf.reduce_mean(tf.reduce_sum(bones_pred, axis=1))
+            result["avg_total_bone_length_pred"] = avg_total_bone_length_pred
+
+            bones_gt = tf.diag_part(get_kcs(joint3d_gt, self.C))
+            avg_total_bone_length_gt = tf.reduce_mean(tf.reduce_sum(bones_gt, axis=1))
+            result["avg_total_bone_length_gt"] = avg_total_bone_length_gt
+
+
         return result
 
     def visualize_img(self, img, gt_kp, vert, pred_kp, cam, renderer, seg_gt=None):
@@ -715,6 +726,9 @@ class HMRTrainer(object):
                     tf.summary.scalar('critic/generator_critic_loss',
                                       result["generator_critic_losses"][-1], step=step)
                     tf.summary.scalar('critic/penalty', result["critic_penalty"], step=step)
+                if self.do_bone_evaluation:
+                    tf.summary.scalar('avg_total_bone_lenth_pred', result["avg_total_bone_length_pred"], step=step)
+                    tf.summary.scalar('avg_total_bone_lenth_gt', result["avg_total_bone_length_gt"], step=step)
                 self.generator_writer.flush()
 
                 print("one step took", (end_time - start_time), "seconds")
