@@ -512,11 +512,11 @@ class HMRTrainer(object):
                                                          xs=[interpolated_kcs,
                                                              interpolated_joints,
                                                              interpolated_shapes])
-                    tf.print("out_interpolated", out_interpolated.shape)
-                    tf.print("gradients", len(gradients_to_penalize))
-                    tf.print("gradients[0]", gradients_to_penalize[0].shape)
-                    tf.print("gradients[1]", gradients_to_penalize[1].shape)
-                    tf.print("gradients[2]", gradients_to_penalize[2].shape)
+                    #tf.print("out_interpolated", out_interpolated.shape)
+                    #tf.print("gradients", len(gradients_to_penalize))
+                    #tf.print("gradients[0]", gradients_to_penalize[0].shape)
+                    #tf.print("gradients[1]", gradients_to_penalize[1].shape)
+                    #tf.print("gradients[2]", gradients_to_penalize[2].shape)
                     tf.print("gradients[0].norm",
                              tf.norm(tf.reduce_mean(gradients_to_penalize[0]), ord='euclidean'))
                     tf.print("gradients[1].norm",
@@ -529,14 +529,14 @@ class HMRTrainer(object):
                         1. - tf.norm(tf.reduce_mean(gradients_to_penalize[1], 0), ord='euclidean'))
                     penalty_3 = tf.square(
                         1. - tf.norm(tf.reduce_mean(gradients_to_penalize[2], 0), ord='euclidean'))
-                    penalty = 10. * (penalty_1 + penalty_2 + penalty_3)
-                    tf.print("penalty", penalty)
+                    penalty = (penalty_1 + penalty_2 + penalty_3)
+                    #tf.print("penalty", penalty)
 
                     #critic_network_loss.append(penalty)
-                    critic_network_loss = critic_network_loss + penalty
+                    critic_network_loss = critic_network_loss + 10. * penalty
                 ##########################################
                 ##########################################
-                tf.print("critic_network_loss:", critic_network_loss)
+                #tf.print("critic_network_loss:", critic_network_loss)
 
                 #critic_network_loss = -(tf.reduce_sum(real_output - fake_output) / real_output.shape[0])
 
@@ -562,13 +562,15 @@ class HMRTrainer(object):
             result["generated_kps"] = all_pred_kps
             result["kp_losses"] = kp_losses
         if self.use_mesh_repro_loss:
-            all_pred_verts = tf.stack(all_pred_verts, axis=1)
-            result["generated_verts"] = all_pred_verts
             result["mr_losses"] = mr_losses
         all_pred_cams = tf.stack(all_pred_cams, axis=1)
+        all_pred_verts = tf.stack(all_pred_verts, axis=1)
+        result["generated_verts"] = all_pred_verts
         result["generated_cams"] = all_pred_cams
 
         if not self.encoder_only:
+            result["generator_critic_losses"] = generator_critic_losses
+            result["critic_penalty"] = penalty
             result["critic_network_loss"] = critic_network_loss
 
         return result
@@ -671,31 +673,30 @@ class HMRTrainer(object):
 
         itr = 0
         epoch = 0
-        for data_gen, data_critic in self.full_dataset:
-            images, segmentations, keypoints = data_gen
-            if not self.encoder_only:
-                joints, shapes = data_critic
-                joints = tf.squeeze(joints, axis=1)
-            else:
-                joints = None
-                shapes = None
-            tf.summary.trace_on(graph=True, profiler=False)
+        with self.generator_writer.as_default():
+            for data_gen, data_critic in self.full_dataset:
+                images, segmentations, keypoints = data_gen
+                if not self.encoder_only:
+                    joints, shapes = data_critic
+                    joints = tf.squeeze(joints, axis=1)
+                else:
+                    joints = None
+                    shapes = None
 
-            start_time = time.time()
-            result = self.train_step(images, segmentations, keypoints, joints, shapes, step)
-            end_time = time.time()
+                start_time = time.time()
+                result = self.train_step(images, segmentations, keypoints, joints, shapes, step)
+                end_time = time.time()
 
-            step = step + 1
-            ############################################################################################
-            # Write Generator update to tensorboard
-            ############################################################################################
+                step = step + 1
+                ############################################################################################
+                # Write Generator update to tensorboard
+                ############################################################################################
 
-            with self.generator_writer.as_default():
 
                 if self.use_kp_loss:
-                    tf.summary.scalar('kp_loss', result["kp_losses"][-1], step=step)
+                    tf.summary.scalar('generator/kp_loss', result["kp_losses"][-1], step=step)
                 if self.use_mesh_repro_loss:
-                    tf.summary.scalar('mr_loss', result["mr_losses"][-1], step=step)
+                    tf.summary.scalar('generator/mr_loss', result["mr_losses"][-1], step=step)
 
                 if tf.equal((step % self.log_img_step), tf.constant(0, dtype=tf.int64)):
                     show_images = tf.gather(images, self.show_these)
@@ -706,38 +707,32 @@ class HMRTrainer(object):
                                       result["generated_verts"], result["generated_kps"],
                                       result["generated_cams"], step, self.generator_writer)
 
+                ##############################################################################################
+                # Write Critic update to tensorboard
+                ############################################################################################
+                if not self.encoder_only:
+                    tf.summary.scalar('critic/critic_network_loss', result["critic_network_loss"], step=step)
+                    tf.summary.scalar('critic/generator_critic_loss',
+                                      result["generator_critic_losses"][-1], step=step)
+                    tf.summary.scalar('critic/penalty', result["critic_penalty"], step=step)
                 self.generator_writer.flush()
 
-            print("one step took", (end_time - start_time), "seconds")
-            writer = tf.summary.create_file_writer('simple_logs/auto_test6')
-            with writer.as_default():
-              tf.summary.trace_export(
-                  name="my_func_trace",
-                  step=0)
+                print("one step took", (end_time - start_time), "seconds")
+                #writer = tf.summary.create_file_writer('simple_logs/auto_test6')
+                #with writer.as_default():
+                  #tf.summary.trace_export(
+                      #name="my_func_trace",
+                      #step=0)
 
-            ##############################################################################################
-            # Write Critic update to tensorboard
-            ############################################################################################
-            if not self.encoder_only:
-                with self.critic_writer.as_default():
-                    tf.summary.scalar('critic_network_loss', result["critic_network_loss"],
-                                      step=step)
-                    '''
-                    tf.summary.scalar('wgan_loss', result["critic_network_loss"][0],
-                                             step=step)
-                    tf.summary.scalar('wgan_gradient_penalty', result["critic_network_loss"][1],
-                                      step=step)
-                    '''
-                    self.critic_writer.flush()
 
-            itr += self.num_gen_steps_per_itr
-            print("itr", itr, "/", self.num_itr_per_epoch)
-            if itr >= self.num_itr_per_epoch:
-                itr = 0
-                epoch += 1
+                itr += self.num_gen_steps_per_itr
+                print("itr", itr, "/", self.num_itr_per_epoch)
+                if itr >= self.num_itr_per_epoch:
+                    itr = 0
+                    epoch += 1
 
-                if epoch >= self.max_epoch:
-                    break
+                    if epoch >= self.max_epoch:
+                        break
 
-                print("epoch",epoch)
+                    print("epoch",epoch)
         print('Finish training on %s' % self.model_dir)

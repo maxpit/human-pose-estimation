@@ -23,12 +23,13 @@ def num_examples(datasets):
         'lsp_few_new': 10,
         'lsp_few_new_1': 10,
         'lsp': 2000,
-        'lsp_ext': 10000,
+        'lsp_train': 8,
+        'lsp_ext': 8642,
         'lsp_single': 1,
         'lsp_single_new': 1,
         'single_new_try': 1,
         'lsp_32': 32,
-        'mpii': 20000,
+        'mpii': 13030,
         'h36m': 312188,
         'coco': 79344,
         'mpi_inf_3dhp': 147221,  # without S8
@@ -134,7 +135,9 @@ class DataLoader(object):
             dataset = tf.data.TFRecordDataset(filenames)
 
             dataset = dataset.map(data_utils.parse_example_proto)
+            print("loaded datasets")
             dataset = dataset.map(self.image_preprocessing)
+            print("preprocessed datasets")
 
             return dataset
 
@@ -148,7 +151,6 @@ class DataLoader(object):
                             pose=None,
                             gt3d=None):
 
-        print("preprocessing")
         print("img:",image)
         print("seg:",seg_gt)
         print("size:",image_size)
