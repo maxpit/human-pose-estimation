@@ -6,20 +6,28 @@ import sys
 from absl import flags
 import numpy as np
 import src.util.create_dataset as cd
+import src.util.create_mpii_dataset as cd_mpii
+from os.path import join, dirname
 
 def main():
-    lsp = False
-    lsp_e = True
+    lsp = True
+    lsp_e = False
+    mpii = False
     dir_name = '/home/valentin/Code/ADL/human-pose-estimation/datasets/'
     if lsp:
         tfrecords_file_name = dir_name + 'lsp_train.tfrecords'
         file_name_pairs = cd.get_filename_pairs_lsp()
-        cd.create(tfrecords_file_name, file_name_pairs[:1000])
-        print("creating dataset with", len(file_name_pairs[:1000]),"entries")
+        cd.create(tfrecords_file_name, file_name_pairs[:8], dataset="lsp")
+        print("creating dataset with", len(file_name_pairs),"entries")
     if lsp_e:
         tfrecords_file_name = dir_name + 'lsp_ext.tfrecords'
         file_name_pairs = cd.get_filename_pairs_lspe()
-        cd.create(tfrecords_file_name, file_name_pairs, True)
+        cd.create(tfrecords_file_name, file_name_pairs, dataset="lsp_ext")
+        print("creating dataset with", len(file_name_pairs), "entries")
+    if mpii:
+        tfrecords_file_name = dir_name + 'mpii.tfrecords'
+        file_name_pairs = cd.get_filename_pairs_mpii()
+        cd.create(tfrecords_file_name, file_name_pairs, dataset="mpii")
         print("creating dataset with", len(file_name_pairs),"entries")
 
 
