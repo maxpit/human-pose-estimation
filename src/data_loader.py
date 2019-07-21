@@ -55,6 +55,7 @@ class DataLoader(object):
         self.config = config
 
         self.dataset_dir = config.data_dir
+        self.val_datasets = None#config.val_datasets
         self.datasets = config.datasets
         self.batch_size = config.batch_size
         self.data_format = config.data_format
@@ -74,6 +75,15 @@ class DataLoader(object):
         image_loader = self.get_loader()
 
         return image_loader
+
+    def load_val_dataset(self):
+        files = data_utils.get_all_files(self.dataset_dir, self.val_datasets)
+
+        print("validation sets:", files)
+
+        dataset = self.read_data(files)
+
+        return dataset
 
     def get_loader(self, train_test_split=1):
         """
@@ -97,7 +107,7 @@ class DataLoader(object):
 
         data_dirs = [
             join(self.dataset_dir, 'mocap_neutrMosh',
-                 'neutrSMPL_%s_*.tfrecord' % dataset)
+                 'neutrSMPL_%s_*.tfrecords' % dataset)
             for dataset in self.mocap_datasets
         ]
         files = []

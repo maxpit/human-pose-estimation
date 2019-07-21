@@ -38,7 +38,7 @@ from .util import renderer as vis_util
 #from .util.data_utils import get_silhouette_from_seg_im as get_sil
 
 class HMRTrainer(object):
-    def __init__(self, config, dataset, mocap_dataset = None):
+    def __init__(self, config, dataset, mocap_dataset = None, val_dataset=None):
         """
         Args:
           config
@@ -59,7 +59,8 @@ class HMRTrainer(object):
         self.pretrained_model_path = config.pretrained_model_path
         self.encoder_only = config.encoder_only
         self.use_3d_label = config.use_3d_label
-        self.use_rotation = config.use_rotation
+        self.use_rotation = True #config.use_rotation
+        self.use_validation = False#config.use_validation
         # Data size
         self.img_size = config.img_size
         #print(self.img_size)
@@ -130,8 +131,8 @@ class HMRTrainer(object):
             face_path=config.smpl_face_path)
 
         # Initialise the tensorboard writers
-        self.generator_writer = tf.summary.create_file_writer(self.model_dir+'generator')
-        self.critic_writer = tf.summary.create_file_writer(self.model_dir+'critic')
+        self.training_writer = tf.summary.create_file_writer(self.model_dir + 'training')
+        self.val_writer = tf.summary.create_file_writer(self.model_dir+'validation')
 
         self.theta_prev = self.load_mean_param()
 #        if self.use_3d_label:
@@ -189,6 +190,13 @@ class HMRTrainer(object):
             self.full_dataset.append(critic_dataset)
         else:
             self.full_dataset.append(tf.data.Dataset.range(2000).repeat())
+
+        if val_dataset is not None:
+            val_dataset = val_dataset.shuffle(buffer_size=1000).repeat()
+            val_dataset = val_dataset.batch(self.batch_size)
+            self.full_dataset.append(val_dataset)
+        else:
+            self.full_dataset.append(tf.data.Dataset.range(2000).repeat())
         # create one dataset so its easier to iterate over it
         self.full_dataset = tf.data.Dataset.zip(tuple(self.full_dataset))
 
@@ -206,13 +214,13 @@ class HMRTrainer(object):
         self.generator3d = Encoder_fc3_dropout()
         self.critic_network = Critic_network(use_rotation=self.use_rotation)
 
-        self.checkpoint_dir = './training_checkpoints'
-        self.checkpoint_prefix = os.path.join(self.checkpoint_dir, "ckpt")
-        self.checkpoint = tf.train.Checkpoint(generator_optimizer=self.generator_optimizer,
-                                         discriminator_optimizer=self.critic_optimizer,
-                                         feature_extractor=self.image_feature_extractor,
-                                         generator3d=self.generator3d,
-                                         discriminator=self.critic_network)
+        #self.checkpoint_dir = './training_checkpoints'
+        #self.checkpoint_prefix = os.path.join(self.checkpoint_dir, "ckpt")
+        #self.checkpoint = tf.train.Checkpoint(generator_optimizer=self.generator_optimizer,
+        #                                 discriminator_optimizer=self.critic_optimizer,
+        #                                 feature_extractor=self.image_feature_extractor,
+        #                                 generator3d=self.generator3d,
+        #                                 discriminator=self.critic_network)
 
     def use_pretrained(self):
         """
@@ -255,6 +263,142 @@ class HMRTrainer(object):
             mean, name="mean_param", dtype=tf.float32, trainable=True)
         #init_mean = tf.tile(self.mean_var, [self.batch_size, 1])
         return mean_var
+
+
+    # Notice the use of `tf.function`
+    # This annotation causes the function to be "compiled".
+    @tf.function
+    def val_step(self, images, seg_gts, kp2d_gts):
+        print("not autographed")
+
+        if self.data_format == 'NCHW':
+            # B x H x W x 3 --> B x 3 x H x W
+            images = tf.transpose(images, [0, 3, 1, 2])
+            seg_gts = tf.transpose(seg_gts, [0, 3, 1, 2])
+
+        kp_losses = []
+        mr_losses = []
+        all_pred_verts  = []
+        all_pred_cams  = []
+        all_pred_kps = []
+        generator_critic_losses = []
+        all_fake_Rs = []
+
+        #Extract feature vector from image using resnet
+        extracted_features = self.image_feature_extractor(images, training=False)
+        theta_prev = tf.tile(self.mean_var, [self.batch_size, 1])
+        # Main IEF loop
+        for i in range(self.num_stage):
+            state = tf.concat([extracted_features, theta_prev], 1)
+            delta_theta = self.generator3d(state, training=False)
+
+            # Compute new theta
+            theta_here = theta_prev + delta_theta
+            # cam = N x 3, pose N x self.num_theta, shape: N x 10
+
+            generated_cams = theta_here[:, :self.num_cam]
+            generated_poses = theta_here[:, self.num_cam:(self.num_cam + self.num_theta)]
+            generated_shapes = theta_here[:, (self.num_cam + self.num_theta):]
+
+            # Rs_wglobal is Nx24x3x3 rotation matrices of poses
+            generated_verts, generated_joints, generated_pred_Rs = self.smpl(generated_shapes, generated_poses, get_skin=True)
+            generated_pred_Rs = generated_pred_Rs[:,1:,:]
+
+            #For visualization
+            all_pred_verts.append(tf.gather(generated_verts, self.show_these))
+            all_pred_cams.append(tf.gather(generated_cams, self.show_these))
+
+            ##############################################################################################
+            # Calculate Generator Losses
+            ##############################################################################################
+
+            #Calculate keypoint reprojection loss
+            pred_kp = batch_orth_proj_idrot(generated_joints, generated_cams,
+                                                name='val_proj2d_stage%d' % i)
+            # For visulalization
+            all_pred_kps.append(tf.gather(pred_kp, self.show_these))
+            if self.use_kp_loss:
+                kp_losses.append(
+                    self.generator_kp_loss_weight * keypoint_l1_loss(kp2d_gts, pred_kp)
+                )
+
+            #Calculate mesh reprojection loss
+            if self.use_mesh_repro_loss:
+                silhouette_pred = reproject_vertices(generated_verts,
+                                                     generated_cams,
+                                                     tf.constant([self.img_size, self.img_size], tf.float32),
+                                                     name='val_mesh_reproject_stage%d' % i)
+                # silhouette_gt: first entry = index sample;
+                #                second,third = coordinate of pixel with value > 0.
+                silhouette_gt = tf.cast(tf.where(tf.greater(seg_gts, 0.))[:, :3], tf.float32)
+
+                repro_loss = mesh_reprojection_loss(
+                    silhouette_gt, silhouette_pred, self.batch_size,
+                    name='mesh_repro_loss%d' % i)
+                repro_loss_scaled = repro_loss * self.mr_loss_weight
+
+                mr_losses.append(repro_loss_scaled)
+
+            #Calculate ctritic loss
+            if not self.encoder_only:
+                all_fake_Rs.append(generated_pred_Rs)
+                kcs = get_kcs(generated_joints, self.C)
+                #generated_joints = tf.transpose(generated_joints, perm=[0,2,1])[:,:,:self.num_joints]
+                generator_critic_out = self.critic_network([kcs,
+                                                   generated_joints[:,:self.num_joints,:],
+                                                   generated_shapes,
+                                                   generated_pred_Rs],
+                                                   training=False
+                                                 )
+
+                generator_critic_loss = - tf.reduce_sum(tf.reduce_mean(generator_critic_out, 0))
+                #tf.print("CRITIC LOSS", generator_critic_loss)
+                generator_critic_losses.append(generator_critic_loss * self.critic_loss_weight)
+
+            # Save things for visualiations:
+            #self.all_verts.append(tf.gather(verts, self.show_these))
+            #if(not self.use_mesh_repro_loss):
+            #self.all_pred_kps.append(tf.gather(pred_kp, self.show_these))
+            #if(self.use_mesh_repro_loss):
+            #    self.all_pred_silhouettes.append(tf.gather(silhouette_pred, self.show_these))
+            #self.all_pred_cams.append(tf.gather(cams, self.show_these))
+
+            # Finally update to end iteration.
+            theta_prev = theta_here
+
+        generator_loss_sum = 0.
+        if self.use_kp_loss:
+            #generator_loss_sum.append(kp_losses[-1])
+            generator_loss_sum += kp_losses[-1]
+        if self.use_mesh_repro_loss:
+            generator_loss_sum += mr_losses[-1]
+        if not self.encoder_only:
+            generator_loss_sum += generator_critic_losses[-1]
+            pass
+
+
+        #################################################################################################
+        # Return results
+        #################################################################################################
+        result = {}
+
+
+        if self.use_kp_loss:
+            result["kp_losses"] = kp_losses
+        if self.use_mesh_repro_loss:
+            result["mr_losses"] = mr_losses
+        all_pred_kps = tf.stack(all_pred_kps, axis=1)
+        result["generated_kps"] = all_pred_kps
+        all_pred_cams = tf.stack(all_pred_cams, axis=1)
+        all_pred_verts = tf.stack(all_pred_verts, axis=1)
+        result["generated_verts"] = all_pred_verts
+        result["generated_cams"] = all_pred_cams
+
+        if not self.encoder_only:
+            result["generator_critic_losses"] = generator_critic_losses
+
+        return result
+
 
     # Notice the use of `tf.function`
     # This annotation causes the function to be "compiled".
@@ -642,7 +786,7 @@ class HMRTrainer(object):
             combined = np.hstack([skel_img, rend_img / 255.])
         return combined
 
-    def draw_results(self, imgs, segs_gt, gt_kps, est_verts, pred_kps, cam, step, writer):
+    def draw_results(self, imgs, segs_gt, gt_kps, est_verts, pred_kps, cam, step):
         import io
         import matplotlib.pyplot as plt
         import cv2
@@ -704,27 +848,27 @@ class HMRTrainer(object):
 
         itr = 0
         epoch = 0
-        with self.generator_writer.as_default():
-            for data_gen, data_critic in self.full_dataset:
-                images, segmentations, keypoints = data_gen
-                if not self.encoder_only:
-                    joints, shapes, rotations = data_critic
-                    joints = tf.squeeze(joints, axis=1)
-                else:
-                    joints = None
-                    rotations = None
-                    shapes = None
+        for data_gen, data_critic, val_data in self.full_dataset:
+            images, segmentations, keypoints = data_gen
+            if not self.encoder_only:
+                joints, shapes, rotations = data_critic
+                joints = tf.squeeze(joints, axis=1)
+            else:
+                joints = None
+                rotations = None
+                shapes = None
 
-                start_time = time.time()
-                result = self.train_step(images, segmentations, keypoints, joints, shapes,
-                                         tf.squeeze(rotations)[:,1:,:], step)
-                end_time = time.time()
+            start_time = time.time()
+            result = self.train_step(images, segmentations, keypoints, joints, shapes,
+                                     tf.squeeze(rotations)[:,1:,:], step)
+            end_time = time.time()
 
-                step = step + 1
-                ############################################################################################
-                # Write Generator update to tensorboard
-                ############################################################################################
+            step = step + 1
+            ############################################################################################
+            # Write Generator update to tensorboard
+            ############################################################################################
 
+            with self.training_writer.as_default():
 
                 if self.use_kp_loss:
                     tf.summary.scalar('generator/kp_loss', result["kp_losses"][-1], step=step)
@@ -736,9 +880,9 @@ class HMRTrainer(object):
                     show_segs = tf.gather(segmentations, self.show_these)
                     show_kps = tf.gather(keypoints, self.show_these)
                     print("drawing images now")
-                    self.draw_results(show_images, show_segs, show_kps,
-                                      result["generated_verts"], result["generated_kps"],
-                                      result["generated_cams"], step, self.generator_writer)
+                    # self.draw_results(show_images, show_segs, show_kps,
+                    #                   result["generated_verts"], result["generated_kps"],
+                    #                   result["generated_cams"], step)
 
                 ##############################################################################################
                 # Write Critic update to tensorboard
@@ -751,26 +895,44 @@ class HMRTrainer(object):
                 if self.do_bone_evaluation:
                     tf.summary.scalar('avg_total_bone_lenth_pred', result["avg_total_bone_length_pred"], step=step)
                     tf.summary.scalar('avg_total_bone_lenth_gt', result["avg_total_bone_length_gt"], step=step)
-                self.generator_writer.flush()
+                self.training_writer.flush()
 
-                print("one step took", (end_time - start_time), "seconds")
-                #writer = tf.summary.create_file_writer('simple_logs/auto_test6')
-                #with writer.as_default():
-                  #tf.summary.trace_export(
-                      #name="my_func_trace",
-                      #step=0)
+            print("one step took", (end_time - start_time), "seconds")
 
+            if self.use_validation:
+                ##########################################################################
+                # validation step
+                ##########################################################################
+                images, segmentations, keypoints = val_data
 
-                itr += self.num_gen_steps_per_itr
-                print("itr", itr, "/", self.num_itr_per_epoch)
-                if itr >= self.num_itr_per_epoch:
-                    itr = 0
-                    epoch += 1
+                val_result = self.val_step(images, segmentations, keypoints)
 
-                    self.checkpoint.save(self.checkpoint_prefix)
+                with self.val_writer.as_default():
+                    if self.use_kp_loss:
+                        tf.summary.scalar('generator/kp_loss', val_result["kp_losses"][-1], step=step)
+                    if self.use_mesh_repro_loss:
+                        tf.summary.scalar('generator/mr_loss', val_result["mr_losses"][-1], step=step)
 
-                    if epoch >= self.max_epoch:
-                        break
+                    if tf.equal((step % self.log_img_step), tf.constant(0, dtype=tf.int64)):
+                        show_images = tf.gather(images, self.show_these)
+                        show_segs = tf.gather(segmentations, self.show_these)
+                        show_kps = tf.gather(keypoints, self.show_these)
+                        print("drawing images now")
+                        # self.draw_results(show_images, show_segs, show_kps,
+                        #                   val_result["generated_verts"], val_result["generated_kps"],
+                        #                   val_result["generated_cams"], step)
+                    self.val_writer.flush()
 
-                    print("epoch",epoch)
+            itr += self.num_gen_steps_per_itr
+            print("itr", itr, "/", self.num_itr_per_epoch)
+            if itr >= self.num_itr_per_epoch:
+                itr = 0
+                epoch += 1
+
+                #self.checkpoint.save(self.checkpoint_prefix)
+
+                if epoch >= self.max_epoch:
+                    break
+
+                print("epoch", epoch)
         print('Finish training on %s' % self.model_dir)

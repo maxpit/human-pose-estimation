@@ -29,7 +29,7 @@ def main(config):
       try:
         # Currently, memory growth needs to be the same across GPUs
         for gpu in gpus:
-          tf.config.experimental.set_memory_growth(gpu, True)
+            tf.config.experimental.set_memory_growth(gpu, True)
         logical_gpus = tf.config.experimental.list_logical_devices('GPU')
         print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
       except RuntimeError as e:
@@ -42,10 +42,11 @@ def main(config):
         data_loader = DataLoader(config)
         dataset = data_loader.load()
         smpl_loader = data_loader.get_smpl_loader()
+        val_dataset = None#data_loader.load_val_dataset()
 
 #    iterator = dataset.make_one_shot_iterator()
 
-    trainer = HMRTrainer(config, dataset, smpl_loader)
+    trainer = HMRTrainer(config, dataset, smpl_loader, val_dataset)
     save_config(config)
     trainer.train()
 
