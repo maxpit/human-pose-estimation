@@ -44,8 +44,9 @@ def Encoder_resnet(num_last_layers_to_train=12, trainable=True, weight_decay=0.0
         resnet = apps.ResNet50(include_top=False, weights='imagenet', pooling='avg')
         if trainable:
             resnet.trainable = True
-            for l in resnet.layers[:(len(resnet.layers) - num_last_layers_to_train)]:
-                l.trainable = False
+            if not num_last_layers_to_train == -1:
+                for l in resnet.layers[:(len(resnet.layers) - num_last_layers_to_train)]:
+                    l.trainable = False
         else:
             resnet.trainable = False
     return resnet

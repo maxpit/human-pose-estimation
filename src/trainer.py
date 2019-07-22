@@ -60,7 +60,7 @@ class HMRTrainer(object):
         self.encoder_only = config.encoder_only
         self.use_3d_label = config.use_3d_label
         self.use_rotation = True #config.use_rotation
-        self.use_validation = False#config.use_validation
+        self.use_validation = True#config.use_validation
         # Data size
         self.img_size = config.img_size
         #print(self.img_size)
@@ -73,7 +73,7 @@ class HMRTrainer(object):
         # Data
         num_images = num_examples(config.datasets)
         num_mocap = num_examples(config.mocap_datasets)
-        self.val_step = config.validation_step_size
+        self.val_step_size = config.validation_step_size
         self.log_img_step = config.log_img_step
         self.validation_step_size = config.validation_step_size
         # Model spec
@@ -94,7 +94,7 @@ class HMRTrainer(object):
 
         self.use_gradient_penalty = config.use_gradient_penalty
         self.num_joints = 14
-        self.do_bone_evaluation = False
+        self.do_bone_evaluation = True
 
         #######################################################################################
         # Calculate necessary information
@@ -210,17 +210,18 @@ class HMRTrainer(object):
         #self.critic_optimizer = tf.keras.optimizers.Adam(self.critic_lr)
 
         # Load models
-        self.image_feature_extractor = Encoder_resnet()
+        self.image_feature_extractor = Encoder_resnet(num_last_layers_to_train=-1)
         self.generator3d = Encoder_fc3_dropout()
         self.critic_network = Critic_network(use_rotation=self.use_rotation)
 
-        #self.checkpoint_dir = './training_checkpoints'
-        #self.checkpoint_prefix = os.path.join(self.checkpoint_dir, "ckpt")
-        #self.checkpoint = tf.train.Checkpoint(generator_optimizer=self.generator_optimizer,
-        #                                 discriminator_optimizer=self.critic_optimizer,
-        #                                 feature_extractor=self.image_feature_extractor,
-        #                                 generator3d=self.generator3d,
-        #                                 discriminator=self.critic_network)
+        print("checkpoint")
+        self.checkpoint_dir = './training_checkpoints'
+        self.checkpoint_prefix = os.path.join(self.checkpoint_dir, "ckpt")
+        self.checkpoint = tf.train.Checkpoint(generator_optimizer=self.generator_optimizer,
+                                         discriminator_optimizer=self.critic_optimizer,
+                                         feature_extractor=self.image_feature_extractor,
+                                         generator3d=self.generator3d,
+                                         discriminator=self.critic_network)
 
     def use_pretrained(self):
         """
@@ -267,7 +268,7 @@ class HMRTrainer(object):
 
     # Notice the use of `tf.function`
     # This annotation causes the function to be "compiled".
-    @tf.function
+    #@tf.function
     def val_step(self, images, seg_gts, kp2d_gts):
         print("not autographed")
 
@@ -285,12 +286,12 @@ class HMRTrainer(object):
         all_fake_Rs = []
 
         #Extract feature vector from image using resnet
-        extracted_features = self.image_feature_extractor(images, training=False)
+        extracted_features = self.image_feature_extractor.predict(images)
         theta_prev = tf.tile(self.mean_var, [self.batch_size, 1])
-        # Main IEF loop
+            # Main IEF loop
         for i in range(self.num_stage):
             state = tf.concat([extracted_features, theta_prev], 1)
-            delta_theta = self.generator3d(state, training=False)
+            delta_theta = self.generator3d.predict(state)
 
             # Compute new theta
             theta_here = theta_prev + delta_theta
@@ -319,7 +320,8 @@ class HMRTrainer(object):
             all_pred_kps.append(tf.gather(pred_kp, self.show_these))
             if self.use_kp_loss:
                 kp_losses.append(
-                    self.generator_kp_loss_weight * keypoint_l1_loss(kp2d_gts, pred_kp)
+                    self.generator_kp_loss_weight * keypoint_l1_loss(kp2d_gts, pred_kp,
+                                                                     name='val_kp_loss')
                 )
 
             #Calculate mesh reprojection loss
@@ -334,7 +336,7 @@ class HMRTrainer(object):
 
                 repro_loss = mesh_reprojection_loss(
                     silhouette_gt, silhouette_pred, self.batch_size,
-                    name='mesh_repro_loss%d' % i)
+                    name='val_mesh_repro_loss%d' % i)
                 repro_loss_scaled = repro_loss * self.mr_loss_weight
 
                 mr_losses.append(repro_loss_scaled)
@@ -442,7 +444,7 @@ class HMRTrainer(object):
         with tf.GradientTape() as gen_tape:
             #Extract feature vector from image using resnet
             #print("images.shape", images.shape)
-            extracted_features = self.image_feature_extractor(images, training=True)
+            extracted_features = self.image_feature_extractor(images)
             theta_prev = tf.tile(self.mean_var, [self.batch_size, 1])
             #theta_prev = tf.zeros((self.batch_size, 85))
             #print("extracted_features.shape", extracted_features.shape)
@@ -456,7 +458,7 @@ class HMRTrainer(object):
                 #print(state.shape)
                 #TODO how do i get reuse=true for this?
                 if i != self.num_stage-1:
-                    delta_theta = self.generator3d(state, training=False)
+                    delta_theta = self.generator3d(state, training=True)
                 else:
                     delta_theta = self.generator3d(state, training=True)#, reuse=True)
 
@@ -669,7 +671,7 @@ class HMRTrainer(object):
                                                             interpolated_joints[:, :self.num_joints, :],
                                                             interpolated_shapes,
                                                             interpolated_Rs],
-                                                           training=True)
+                                                           training=False)
                     gradients_to_penalize = tf.gradients(ys=out_interpolated,
                                                          xs=[interpolated_kcs,
                                                              interpolated_joints,
@@ -848,6 +850,11 @@ class HMRTrainer(object):
 
         itr = 0
         epoch = 0
+
+        print("restore checkpoint")
+        print(self.checkpoint.restore(tf.train.latest_checkpoint(self.checkpoint_dir)))
+        print("checkpoint restored")
+
         for data_gen, data_critic, val_data in self.full_dataset:
             images, segmentations, keypoints = data_gen
             if not self.encoder_only:
@@ -880,9 +887,9 @@ class HMRTrainer(object):
                     show_segs = tf.gather(segmentations, self.show_these)
                     show_kps = tf.gather(keypoints, self.show_these)
                     print("drawing images now")
-                    # self.draw_results(show_images, show_segs, show_kps,
-                    #                   result["generated_verts"], result["generated_kps"],
-                    #                   result["generated_cams"], step)
+                    self.draw_results(show_images, show_segs, show_kps,
+                                       result["generated_verts"], result["generated_kps"],
+                                       result["generated_cams"], step)
 
                 ##############################################################################################
                 # Write Critic update to tensorboard
@@ -893,20 +900,22 @@ class HMRTrainer(object):
                                       result["generator_critic_losses"][-1], step=step)
                     tf.summary.scalar('critic/penalty', result["critic_penalty"], step=step)
                 if self.do_bone_evaluation:
-                    tf.summary.scalar('avg_total_bone_lenth_pred', result["avg_total_bone_length_pred"], step=step)
-                    tf.summary.scalar('avg_total_bone_lenth_gt', result["avg_total_bone_length_gt"], step=step)
+                    tf.summary.scalar('bones/avg_total_bone_lenth_pred', result["avg_total_bone_length_pred"], step=step)
+                    tf.summary.scalar('bones/avg_total_bone_lenth_gt', result["avg_total_bone_length_gt"], step=step)
                 self.training_writer.flush()
 
-            print("one step took", (end_time - start_time), "seconds")
-
-            if self.use_validation:
+            if self.use_validation and tf.equal((step % 500), tf.constant(0, dtype=tf.int64)):
                 ##########################################################################
                 # validation step
                 ##########################################################################
-                images, segmentations, keypoints = val_data
+                val_images, val_segmentations, val_keypoints = val_data
 
-                val_result = self.val_step(images, segmentations, keypoints)
+                val_result = self.val_step(val_images, val_segmentations, val_keypoints)
 
+                print("VALIDATION!")
+                print("validation: kp:", result["kp_losses"][-1].numpy(), ", mr:",
+                      result["kp_losses"][-1].numpy(),
+                      "critic:", result["generator_critic_losses"][-1].numpy())
                 with self.val_writer.as_default():
                     if self.use_kp_loss:
                         tf.summary.scalar('generator/kp_loss', val_result["kp_losses"][-1], step=step)
@@ -914,22 +923,27 @@ class HMRTrainer(object):
                         tf.summary.scalar('generator/mr_loss', val_result["mr_losses"][-1], step=step)
 
                     if tf.equal((step % self.log_img_step), tf.constant(0, dtype=tf.int64)):
-                        show_images = tf.gather(images, self.show_these)
-                        show_segs = tf.gather(segmentations, self.show_these)
-                        show_kps = tf.gather(keypoints, self.show_these)
+                        show_images = tf.gather(val_images, self.show_these)
+                        show_segs = tf.gather(val_segmentations, self.show_these)
+                        show_kps = tf.gather(val_keypoints, self.show_these)
                         print("drawing images now")
-                        # self.draw_results(show_images, show_segs, show_kps,
-                        #                   val_result["generated_verts"], val_result["generated_kps"],
-                        #                   val_result["generated_cams"], step)
+                        self.draw_results(show_images, show_segs, show_kps,
+                                          val_result["generated_verts"], val_result["generated_kps"],
+                                          val_result["generated_cams"], step)
                     self.val_writer.flush()
 
             itr += self.num_gen_steps_per_itr
-            print("itr", itr, "/", self.num_itr_per_epoch)
+            print("itr", itr, "/", self.num_itr_per_epoch, ", epoch:", epoch, "in", (end_time - start_time), "s")
+            print("critic_loss", result['critic_network_loss'].numpy(), ", penalty:",
+                  result["critic_penalty"].numpy())
+            print("generator: kp:", result["kp_losses"][-1].numpy(), ", mr:",
+                  result["kp_losses"][-1].numpy(),
+                  "critic:", result["generator_critic_losses"][-1].numpy())
             if itr >= self.num_itr_per_epoch:
                 itr = 0
                 epoch += 1
 
-                #self.checkpoint.save(self.checkpoint_prefix)
+                self.checkpoint.save(self.checkpoint_prefix)
 
                 if epoch >= self.max_epoch:
                     break
