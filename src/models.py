@@ -42,13 +42,13 @@ def Encoder_resnet(num_last_layers_to_train=12, trainable=True, weight_decay=0.0
     import tensorflow.keras.applications as apps
     with tf.name_scope("Encoder_resnet"):
         resnet = apps.ResNet50(include_top=False, weights='imagenet', pooling='avg')
-        if trainable:
-            resnet.trainable = True
-            if not num_last_layers_to_train == -1:
-                for l in resnet.layers[:(len(resnet.layers) - num_last_layers_to_train)]:
-                    l.trainable = False
-        else:
-            resnet.trainable = False
+        #if trainable:
+            #resnet.trainable = True
+            #if not num_last_layers_to_train == -1:
+                #for l in resnet.layers[:(len(resnet.layers) - num_last_layers_to_train)]:
+                    #l.trainable = False
+        #else:
+            #resnet.trainable = False
     return resnet
 
     #         net, end_points = resnet_v2.resnet_v2_50(

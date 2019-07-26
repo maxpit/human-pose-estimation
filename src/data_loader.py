@@ -23,7 +23,8 @@ def num_examples(datasets):
         'lsp_few_new': 10,
         'lsp_few_new_1': 10,
         'lsp': 2000,
-        'lsp_train': 8,
+        'lsp_train': 1000,
+        'lsp_val': 1000,
         'lsp_ext': 8642,
         'lsp_single': 1,
         'lsp_single_new': 1,
@@ -55,7 +56,7 @@ class DataLoader(object):
         self.config = config
 
         self.dataset_dir = config.data_dir
-        self.val_datasets = None#config.val_datasets
+        self.val_datasets = config.val_datasets
         self.datasets = config.datasets
         self.batch_size = config.batch_size
         self.data_format = config.data_format
@@ -107,7 +108,7 @@ class DataLoader(object):
 
         data_dirs = [
             join(self.dataset_dir, 'mocap_neutrMosh',
-                 'neutrSMPL_%s_*.tfrecords' % dataset)
+                 'neutrSMPL_%s_*.tfrecord' % dataset)
             for dataset in self.mocap_datasets
         ]
         files = []
@@ -136,7 +137,7 @@ class DataLoader(object):
     def preprocess_poses(self, pose, shape):
         print('preprocess_poses with pose', pose, 'and shape', shape)
         verts, joints, rotations = self.smpl(tf.expand_dims(shape,0), pose, get_skin=True)
-
+        # shape = beta, pose = theta
         return joints, shape, rotations
 
     def read_data(self, filenames):

@@ -75,6 +75,7 @@ class HMRTrainer(object):
         self.val_step_size = config.validation_step_size
         self.log_img_step = config.log_img_step
         self.validation_step_size = config.validation_step_size
+        self.checkpoint_dir = config.checkpoint_dir
         # Model spec
         self.model_type = config.model_type
         # Weight decay
@@ -189,8 +190,8 @@ class HMRTrainer(object):
 
         if val_dataset is not None:
             val_dataset = val_dataset.shuffle(buffer_size=1000).repeat()
-            val_dataset = val_dataset.batch(self.batch_size)
-            self.full_dataset.append(val_dataset)
+            self.val_dataset = val_dataset.batch(self.batch_size)
+            self.full_dataset.append(self.val_dataset)
         else:
             self.full_dataset.append(tf.data.Dataset.range(2000).repeat())
         # create one dataset so its easier to iterate over it
@@ -202,22 +203,22 @@ class HMRTrainer(object):
 
         # Initialize optimizers
         self.generator_optimizer = tf.keras.optimizers.Adam(self.generator_lr)
-        self.critic_optimizer = tf.keras.optimizers.RMSprop(self.critic_lr)
-        #self.critic_optimizer = tf.keras.optimizers.Adam(self.critic_lr)
+        #self.critic_optimizer = tf.keras.optimizers.RMSprop(self.critic_lr)
+        self.critic_optimizer = tf.keras.optimizers.Adam(self.critic_lr)
 
         # Load models
-        self.image_feature_extractor = Encoder_resnet(num_last_layers_to_train=-1)
+        self.image_feature_extractor = Encoder_resnet()
         self.generator3d = Encoder_fc3_dropout()
         self.critic_network = Critic_network(use_rotation=self.use_rotation)
 
         print("checkpoint")
-        self.checkpoint_dir = './training_checkpoints_kp_only'
         self.checkpoint_prefix = os.path.join(self.checkpoint_dir, "ckpt")
         self.checkpoint = tf.train.Checkpoint(generator_optimizer=self.generator_optimizer,
                                          discriminator_optimizer=self.critic_optimizer,
                                          feature_extractor=self.image_feature_extractor,
                                          generator3d=self.generator3d,
-                                         discriminator=self.critic_network)
+                                         discriminator=self.critic_network,
+                                         inital_theta=self.theta_prev)
 
     def use_pretrained(self):
         """
@@ -436,7 +437,7 @@ class HMRTrainer(object):
         with tf.GradientTape() as gen_tape:
             #Extract feature vector from image using resnet
             #print("images.shape", images.shape)
-            extracted_features = self.image_feature_extractor(images)
+            extracted_features = self.image_feature_extractor(images, training=True)
             theta_prev = tf.tile(self.mean_var, [self.batch_size, 1])
             #theta_prev = tf.zeros((self.batch_size, 85))
             #print("extracted_features.shape", extracted_features.shape)
@@ -450,7 +451,7 @@ class HMRTrainer(object):
                 #print(state.shape)
                 #TODO how do i get reuse=true for this?
                 if i != self.num_stage-1:
-                    delta_theta = self.generator3d(state, training=True)
+                    delta_theta = self.generator3d(state, training=False)
                 else:
                     delta_theta = self.generator3d(state, training=True)#, reuse=True)
 
@@ -766,14 +767,11 @@ class HMRTrainer(object):
             input_img, gt_joint, draw_edges=False, vis=gt_vis)
         skel_img = vis_util.draw_skeleton(img_with_gt, pred_joint)
 
-        if(self.use_mesh_repro_loss):
-            # seg gt needs to be same dimension as color image.
-            seg_gt = seg_gt.squeeze()
-            seg2_gt = np.stack((seg_gt,seg_gt,seg_gt), axis=2)
-            rend_seg_gt = renderer(vert + cam_t, cam_for_render, img=seg2_gt)
-            combined = np.hstack([skel_img, rend_img / 255., rend_seg_gt / 255.])
-        else:
-            combined = np.hstack([skel_img, rend_img / 255.])
+        # seg gt needs to be same dimension as color image.
+        seg_gt = seg_gt.squeeze()
+        seg2_gt = np.stack((seg_gt,seg_gt,seg_gt), axis=2)
+        rend_seg_gt = renderer(vert + cam_t, cam_for_render, img=seg2_gt)
+        combined = np.hstack([skel_img, rend_img / 255., rend_seg_gt / 255.])
         return combined
 
     def draw_results(self, imgs, segs_gt, gt_kps, est_verts, pred_kps, cam, step):
@@ -827,14 +825,14 @@ class HMRTrainer(object):
         print('...')
         self.mean_var = self.load_mean_param()
         self.global_step = tf.Variable(1, name='global_step', trainable=False, dtype=tf.int64)
-        step = tf.Variable(1, name='step', trainable=False, dtype=tf.int64)
+        step = tf.Variable(67640, name='step', trainable=False, dtype=tf.int64)
 
         itr = 0
         epoch = 0
 
-        #print("restore checkpoint")
-        #print(self.checkpoint.restore(tf.train.latest_checkpoint(self.checkpoint_dir)))
-        #print("checkpoint restored")
+        print("restore checkpoint")
+        print(self.checkpoint.restore(tf.train.latest_checkpoint(self.checkpoint_dir)))
+        print("checkpoint restored")
 
         for data_gen, data_critic, val_data in self.full_dataset:
             images, segmentations, keypoints = data_gen
@@ -878,7 +876,7 @@ class HMRTrainer(object):
                     tf.summary.scalar('bones/avg_total_bone_lenth_gt', result["avg_total_bone_length_gt"], step=step)
                 self.training_writer.flush()
 
-            if self.use_validation and tf.equal((step % 500), tf.constant(0, dtype=tf.int64)):
+            if self.use_validation and tf.equal((step % self.val_step_size), tf.constant(0, dtype=tf.int64)):
                 ##########################################################################
                 # validation step
                 ##########################################################################
@@ -911,10 +909,34 @@ class HMRTrainer(object):
                 itr = 0
                 epoch += 1
 
-                #self.checkpoint.save(self.checkpoint_prefix)
+                if epoch % 5 == 0:
+                    self.checkpoint.save(self.checkpoint_prefix)
 
                 if epoch >= self.max_epoch:
                     break
 
                 print("epoch", epoch)
         print('Finish training on %s' % self.model_dir)
+
+    def validate_checkpoint(self):
+        self.mean_var = self.load_mean_param()
+        print(self.checkpoint.restore(tf.train.latest_checkpoint(self.checkpoint_dir)).expect_partial())
+
+        kp_losses = []
+        mr_losses = []
+        step = 0
+
+        for images, segmentations, keypoints in self.val_dataset:
+            step += 1
+            print("step", step)
+            val_result = self.val_step(images, segmentations, keypoints)
+            kp_losses.append(val_result["kp_losses"][-1])
+            mr_losses.append(val_result["mr_losses"][-1])
+            if step == 250:
+                break
+
+        print(kp_losses)
+        print(mr_losses)
+        print("average kp_loss =", np.mean(kp_losses))
+        print("average mr_loss =", np.mean(mr_losses))
+
