@@ -1,6 +1,5 @@
 """
 Data loader with data augmentation.
-Only used for training.
 """
 from __future__ import absolute_import
 from __future__ import division
@@ -17,12 +16,10 @@ from .util import data_utils
 
 _3D_DATASETS = ['h36m', 'up', 'mpi_inf_3dhp']
 
-
 def num_examples(datasets):
     _NUM_TRAIN = {
         'lsp_few_new': 10,
         'lsp_few_new_1': 10,
-        'lsp': 2000,
         'lsp_train': 1000,
         'lsp_val': 1000,
         'lsp_ext': 8642,
@@ -30,12 +27,6 @@ def num_examples(datasets):
         'lsp_single_new': 1,
         'single_new_try': 1,
         'lsp_32': 32,
-        'mpii': 13030,
-        'h36m': 312188,
-        'coco': 79344,
-        'mpi_inf_3dhp': 147221,  # without S8
-        # Below is number for MOSH/mocap:
-        'H3.6': 1559985,  # without S9 and S11,
         'CMU': 3934267,
         'jointLim': 181968,
     }
@@ -54,7 +45,6 @@ def num_examples(datasets):
 class DataLoader(object):
     def __init__(self, config):
         self.config = config
-
         self.dataset_dir = config.data_dir
         self.val_datasets = config.val_datasets
         self.datasets = config.datasets
@@ -65,47 +55,48 @@ class DataLoader(object):
         # Jitter params:
         self.trans_max = config.trans_max
         self.scale_range = [config.scale_min, config.scale_max]
-
         self.image_normalizing_fn = data_utils.rescale_image
-
         self.smpl_model_path = config.smpl_model_path
         self.smpl = SMPL(self.smpl_model_path)
 
-
+    """
+    Outputs:
+        dataset: Tensorflow dataset containing 2d images, segmentation gt and keypoint gt
+    """
     def load(self):
-        image_loader = self.get_loader()
+        files = data_utils.get_all_files(self.dataset_dir, self.datasets)
+        dataset = self.read_data(files)
+        return dataset
 
-        return image_loader
-
+    """
+    Outputs:
+        dataset: Tensorflow dataset containing 2d images, segmentation gt and keypoint gt
+    """
     def load_val_dataset(self):
         files = data_utils.get_all_files(self.dataset_dir, self.val_datasets)
-
-        print("validation sets:", files)
-
         dataset = self.read_data(files)
 
         return dataset
 
-    def get_loader(self, train_test_split=1):
-        """
-        Outputs:
-          image_batch: batched images as per data_format
-          label_batch: batched keypoint labels N x K x 3
-        """
-        files = data_utils.get_all_files(self.dataset_dir, self.datasets)
+    """
+    Inputs:
+        files = list of tf records.
+    Outputs:
+        dataset = datset containing pose, shape and rotation
+    """
+    def read_data(self, files):
+        dataset = tf.data.TFRecordDataset(files)
 
-        print(files)
-
-        dataset = self.read_data(files)
+        dataset = dataset.map(data_utils.parse_example_proto)
+        dataset = dataset.map(self.image_preprocessing)
 
         return dataset
 
+    """
+    Loads dataset in form of queue, loads shape/pose of smpl.
+    returns a batch of pose & shape
+    """
     def get_smpl_loader(self):
-        """
-        Loads dataset in form of queue, loads shape/pose of smpl.
-        returns a batch of pose & shape
-        """
-
         data_dirs = [
             join(self.dataset_dir, 'mocap_neutrMosh',
                  'neutrSMPL_%s_*.tfrecord' % dataset)
@@ -123,53 +114,50 @@ class DataLoader(object):
 
         return self.get_smpl_loader_from_files(files)
 
-    def get_smpl_loader_from_files(self, files):
-        """
+    """
+    Inputs:
         files = list of tf records.
-        """
-        with tf.name_scope('input_smpl_loader'):
-            dataset = tf.data.TFRecordDataset(files)
-            mocap_dataset = dataset.map(data_utils.parse_mocap_example)
-            mocap_dataset = mocap_dataset.map(self.preprocess_poses)
-            return mocap_dataset
+    Outputs:
+        mocap_dataset = motion capture datset containing 3d poses
+    """
+    def get_smpl_loader_from_files(self, files):
+        dataset = tf.data.TFRecordDataset(files)
+        mocap_dataset = dataset.map(data_utils.parse_mocap_example)
+        mocap_dataset = mocap_dataset.map(self.preprocess_poses)
+        return mocap_dataset
 
-
+    """
+    This function processes the dataset input data into the correct joint, shape and rotation data
+    Inputs:
+        pose = SMPL pose parameters
+        shpae = SMPL shape paramters
+    Outputs:
+        joints = joint positions of this SMPL model
+        shape = SMPL shape parameters
+        rotations = joint rotations of this SMPL model
+    """
     def preprocess_poses(self, pose, shape):
         print('preprocess_poses with pose', pose, 'and shape', shape)
         verts, joints, rotations = self.smpl(tf.expand_dims(shape,0), pose, get_skin=True)
         # shape = beta, pose = theta
         return joints, shape, rotations
 
-    def read_data(self, filenames):
-        print(filenames)
-        with tf.name_scope('read_data'):
-            dataset = tf.data.TFRecordDataset(filenames)
 
-            dataset = dataset.map(data_utils.parse_example_proto)
-            print("loaded datasets")
-            dataset = dataset.map(self.image_preprocessing)
-            print("preprocessed datasets")
-
-            return dataset
-
-    def image_preprocessing(self,
-                            image,
-                            seg_gt,
-                            image_size,
-                            label,
-                            center,
-                            fname,
-                            pose=None,
-                            gt3d=None):
-
-        print("img:",image)
-        print("seg:",seg_gt)
-        print("size:",image_size)
-        print("label:",label)
-        print("center", center)
-        print("pose",pose)
-        print("gt3d:",gt3d)
-        print(" - ")
+    """
+    This function preprocesses the image and segmentation data
+    Inputs:
+        image = rgb image in WxHx3
+        seg_gt = segmentation data in WxHx1
+        image_size = size of the input image
+        label = keypoint gt data
+        center = center of the human in the image
+        fname = filename
+    Outputs:
+        crop = preprocessed image
+        crop_gt = preprocessed segmentation gt
+        final_label = preprocessed keypoint data
+    """
+    def image_preprocessing(self, image, seg_gt, image_size, label, center, fname):
 
         margin = tf.cast(self.output_size / 2, tf.int32)
         with tf.name_scope('image_preprocessing'):
@@ -177,21 +165,17 @@ class DataLoader(object):
             keypoints = label[:2, :]
 
             # Randomly shift center.
-            print('Using translation jitter: %d' % self.trans_max)
             center = data_utils.jitter_center(center, self.trans_max)
-            print("shifted center")
 
             # randomly scale image.
             image, seg_gt, keypoints, center = data_utils.jitter_scale(
                 image, seg_gt, image_size, keypoints, center, self.scale_range)
-            print("scaled image")
 
             # Pad image with safe margin.
             # Extra 50 for safety.
             margin_safe = margin + self.trans_max + 50
             image_pad = data_utils.pad_image_edge(image, margin_safe)
             seg_gt_pad =  data_utils.pad_image_edge(seg_gt, margin_safe)
-            print("padded img and seg", seg_gt_pad)
 
             center_pad = center + margin_safe
             keypoints_pad = keypoints + tf.cast(margin_safe, tf.float32)
@@ -211,15 +195,7 @@ class DataLoader(object):
 
             crop_kp = tf.stack([x_crop, y_crop, visibility])
 
-#            print("before random flip")
-#            print("crop", crop)
-#            print("crop_gt", crop_gt)
-#            print("crop_kp", crop_kp)
-            if pose is not None and gt3d is not None:
-                crop, crop_gt, crop_kp, new_pose, new_gt3d = data_utils.random_flip(
-                    crop, crop_gt, crop_kp, pose, gt3d)
-            else:
-                crop, crop_gt, crop_kp = data_utils.random_flip(crop, crop_gt, crop_kp)
+            crop, crop_gt, crop_kp = data_utils.random_flip(crop, crop_gt, crop_kp)
 
             # Normalize kp output to [-1, 1]
             final_vis = tf.cast(crop_kp[2, :] > 0, tf.float32)
@@ -234,7 +210,4 @@ class DataLoader(object):
             # rescale image from [0, 1] to [-1, 1]
 
             crop = self.image_normalizing_fn(crop)
-            if pose is not None and gt3d is not None:
-                return crop, crop_gt, final_label, new_pose, new_gt3d
-            else:
-                return crop, crop_gt, final_label
+            return crop, crop_gt, final_label
