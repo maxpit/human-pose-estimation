@@ -9,3 +9,7 @@ data/
 .ipynb_checkpoints/
 *.ipynb
 *checkpoint*
+human36m_code/
+images/
+datasets/
+*logs*/
