@@ -53,6 +53,7 @@ class HMRTrainer(object):
         # Get config information
         #######################################################################################
         self.model_dir = config.model_dir
+        self.logs = config.logs
         self.load_path = config.load_path
         self.data_format = config.data_format
         self.smpl_model_path = config.smpl_model_path
@@ -131,8 +132,8 @@ class HMRTrainer(object):
             face_path=config.smpl_face_path)
 
         # Initialise the tensorboard writers
-        self.training_writer = tf.summary.create_file_writer(self.model_dir + 'training')
-        self.val_writer = tf.summary.create_file_writer(self.model_dir+'validation')
+        #self.training_writer = tf.summary.create_file_writer(self.model_dir + 'training')
+        #self.val_writer = tf.summary.create_file_writer(self.model_dir+'validation')
 
         self.theta_prev = self.load_mean_param()
 #        if self.use_3d_label:
@@ -189,7 +190,7 @@ class HMRTrainer(object):
         self.full_dataset.append(critic_dataset)
 
         if val_dataset is not None:
-            val_dataset = val_dataset.shuffle(buffer_size=1000).repeat()
+            #val_dataset = val_dataset.shuffle(buffer_size=1000).repeat()
             self.val_dataset = val_dataset.batch(self.batch_size)
             self.full_dataset.append(self.val_dataset)
         else:
@@ -320,21 +321,22 @@ class HMRTrainer(object):
                                                                  name='val_kp_loss')
             )
 
-            #Calculate mesh reprojection loss
-            silhouette_pred = reproject_vertices(generated_verts,
-                                                 generated_cams,
-                                                 tf.constant([self.img_size, self.img_size], tf.float32),
-                                                 name='val_mesh_reproject_stage%d' % i)
-            # silhouette_gt: first entry = index sample;
-            #                second,third = coordinate of pixel with value > 0.
-            silhouette_gt = tf.cast(tf.where(tf.greater(seg_gts, 0.))[:, :3], tf.float32)
+            if self.use_mesh_repro_loss:
+                #Calculate mesh reprojection loss
+                silhouette_pred = reproject_vertices(generated_verts,
+                                                     generated_cams,
+                                                     tf.constant([self.img_size, self.img_size], tf.float32),
+                                                     name='val_mesh_reproject_stage%d' % i)
+                # silhouette_gt: first entry = index sample;
+                #                second,third = coordinate of pixel with value > 0.
+                silhouette_gt = tf.cast(tf.where(tf.greater(seg_gts, 0.))[:, :3], tf.float32)
 
-            repro_loss = mesh_reprojection_loss(
-                silhouette_gt, silhouette_pred, self.batch_size,
-                name='val_mesh_repro_loss%d' % i)
-            repro_loss_scaled = repro_loss * self.mr_loss_weight
+                repro_loss = mesh_reprojection_loss(
+                    silhouette_gt, silhouette_pred, self.batch_size,
+                    name='val_mesh_repro_loss%d' % i)
+                repro_loss_scaled = repro_loss * self.mr_loss_weight
 
-            mr_losses.append(repro_loss_scaled)
+                mr_losses.append(repro_loss_scaled)
 
             #Calculate ctritic loss
             if not self.encoder_only:
@@ -381,7 +383,8 @@ class HMRTrainer(object):
 
 
         result["kp_losses"] = kp_losses
-        result["mr_losses"] = mr_losses
+        if self.use_mesh_repro_loss:
+            result["mr_losses"] = mr_losses
         all_pred_kps = tf.stack(all_pred_kps, axis=1)
         result["generated_kps"] = all_pred_kps
         all_pred_cams = tf.stack(all_pred_cams, axis=1)
@@ -486,21 +489,22 @@ class HMRTrainer(object):
                     self.generator_kp_loss_weight * keypoint_l1_loss(kp2d_gts, pred_kp)
                 )
 
-                #Calculate mesh reprojection loss
-                silhouette_pred = reproject_vertices(generated_verts,
+                if self.use_mesh_repro_loss:
+                    #Calculate mesh reprojection loss
+                    silhouette_pred = reproject_vertices(generated_verts,
                                                      generated_cams,
                                                      tf.constant([self.img_size, self.img_size], tf.float32),
                                                      name='mesh_reproject_stage%d' % i)
-                # silhouette_gt: first entry = index sample; 
-                #                second,third = coordinate of pixel with value > 0.
-                silhouette_gt = tf.cast(tf.where(tf.greater(seg_gts, 0.))[:, :3], tf.float32)
+                    # silhouette_gt: first entry = index sample; 
+                    #                second,third = coordinate of pixel with value > 0.
+                    silhouette_gt = tf.cast(tf.where(tf.greater(seg_gts, 0.))[:, :3], tf.float32)
 
-                repro_loss = mesh_reprojection_loss(
-                    silhouette_gt, silhouette_pred, self.batch_size,
-                    name='mesh_repro_loss%d' % i)
-                repro_loss_scaled = repro_loss * self.mr_loss_weight
+                    repro_loss = mesh_reprojection_loss(
+                        silhouette_gt, silhouette_pred, self.batch_size,
+                        name='mesh_repro_loss%d' % i)
+                    repro_loss_scaled = repro_loss * self.mr_loss_weight
 
-                mr_losses.append(repro_loss_scaled)
+                    mr_losses.append(repro_loss_scaled)
 
                 #Calculate 3d joint loss
                 #TODO not used atm
@@ -716,7 +720,8 @@ class HMRTrainer(object):
 
 
         result["kp_losses"] = kp_losses
-        result["mr_losses"] = mr_losses
+        if self.use_mesh_repro_loss:
+            result["mr_losses"] = mr_losses
         all_pred_kps = tf.stack(all_pred_kps, axis=1)
         result["generated_kps"] = all_pred_kps
         all_pred_cams = tf.stack(all_pred_cams, axis=1)
@@ -825,14 +830,14 @@ class HMRTrainer(object):
         print('...')
         self.mean_var = self.load_mean_param()
         self.global_step = tf.Variable(1, name='global_step', trainable=False, dtype=tf.int64)
-        step = tf.Variable(67640, name='step', trainable=False, dtype=tf.int64)
+        step = tf.Variable(0, name='step', trainable=False, dtype=tf.int64)
 
         itr = 0
         epoch = 0
 
-        print("restore checkpoint")
-        print(self.checkpoint.restore(tf.train.latest_checkpoint(self.checkpoint_dir)))
-        print("checkpoint restored")
+        #print("restore checkpoint")
+        #print(self.checkpoint.restore(tf.train.latest_checkpoint(self.checkpoint_dir)))
+        #print("checkpoint restored")
 
         for data_gen, data_critic, val_data in self.full_dataset:
             images, segmentations, keypoints = data_gen
@@ -852,7 +857,8 @@ class HMRTrainer(object):
 
             with self.training_writer.as_default():
                 tf.summary.scalar('generator/kp_loss', result["kp_losses"][-1], step=step)
-                tf.summary.scalar('generator/mr_loss', result["mr_losses"][-1], step=step)
+                if self.use_mesh_repro_loss:
+                    tf.summary.scalar('generator/mr_loss', result["mr_losses"][-1], step=step)
 
                 if tf.equal((step % self.log_img_step), tf.constant(0, dtype=tf.int64)):
                     show_images = tf.gather(images, self.show_these)
@@ -885,10 +891,11 @@ class HMRTrainer(object):
                 val_result = self.val_step(val_images, val_segmentations, val_keypoints)
 
                 print("VALIDATION!")
-                print("validation: kp:", result["kp_losses"][-1].numpy(), ", mr:", result["mr_losses"][-1].numpy())#, "critic:", result["generator_critic_losses"][-1].numpy())
+                print("validation: kp:", result["kp_losses"][-1].numpy())#, ", mr:", result["mr_losses"][-1].numpy())#, "critic:", result["generator_critic_losses"][-1].numpy())
                 with self.val_writer.as_default():
                     tf.summary.scalar('generator/kp_loss', val_result["kp_losses"][-1], step=step)
-                    tf.summary.scalar('generator/mr_loss', val_result["mr_losses"][-1], step=step)
+                    if self.use_mesh_repro_loss:
+                        tf.summary.scalar('generator/mr_loss', val_result["mr_losses"][-1], step=step)
 
                     if tf.equal((step % self.log_img_step), tf.constant(0, dtype=tf.int64)):
                         show_images = tf.gather(val_images, self.show_these)
@@ -904,7 +911,7 @@ class HMRTrainer(object):
             print("itr", itr, "/", self.num_itr_per_epoch, ", epoch:", epoch, "in", (end_time - start_time), "s")
             if not self.encoder_only:
                 print("critic_loss", result['critic_network_loss'].numpy(), ", penalty:", result["critic_penalty"].numpy())
-            print("generator: kp:", result["kp_losses"][-1].numpy(), ", mr:", result["mr_losses"][-1].numpy())#, "critic:", result["generator_critic_losses"][-1].numpy())
+            print("generator: kp:", result["kp_losses"][-1].numpy())#, ", mr:", result["mr_losses"][-1].numpy())#, "critic:", result["generator_critic_losses"][-1].numpy())
             if itr >= self.num_itr_per_epoch:
                 itr = 0
                 epoch += 1
@@ -925,6 +932,12 @@ class HMRTrainer(object):
         kp_losses = []
         mr_losses = []
         step = 0
+        best_kp = {"val": 10}
+        best_mr = {"val": 100}
+        worst_kp = {"val": 0}
+        worst_mr = {"val": 0}
+        best_combined = {"val": 100}
+        worst_combined = {"val": 0}
 
         for images, segmentations, keypoints in self.val_dataset:
             step += 1
@@ -932,11 +945,81 @@ class HMRTrainer(object):
             val_result = self.val_step(images, segmentations, keypoints)
             kp_losses.append(val_result["kp_losses"][-1])
             mr_losses.append(val_result["mr_losses"][-1])
-            if step == 250:
-                break
 
+            if best_kp["val"] >= kp_losses[-1]:
+                best_kp.update({
+                    "val": kp_losses[-1],
+                    "images": images,
+                    "segmentations": segmentations,
+                    "keypoints": keypoints,
+                    "verts": val_result["generated_verts"],
+                    "kps": val_result["generated_kps"],
+                    "cams": val_result["generated_cams"]
+                })
+
+            if worst_kp["val"] <= kp_losses[-1]:
+                worst_kp.update({
+                    "val": kp_losses[-1],
+                    "images": images,
+                    "segmentations": segmentations,
+                    "keypoints": keypoints,
+                    "verts": val_result["generated_verts"],
+                    "kps": val_result["generated_kps"],
+                    "cams": val_result["generated_cams"]
+                })
+
+            if best_mr["val"] >= mr_losses[-1]:
+                best_mr.update({
+                    "val": mr_losses[-1],
+                    "images": images,
+                    "segmentations": segmentations,
+                    "keypoints": keypoints,
+                    "verts": val_result["generated_verts"],
+                    "kps": val_result["generated_kps"],
+                    "cams": val_result["generated_cams"]
+                })
+            if worst_mr["val"] <= mr_losses[-1]:
+                worst_mr.update({
+                    "val": mr_losses[-1],
+                    "images": images,
+                    "segmentations": segmentations,
+                    "keypoints": keypoints,
+                    "verts": val_result["generated_verts"],
+                    "kps": val_result["generated_kps"],
+                    "cams": val_result["generated_cams"]
+                })
+
+            if best_combined["val"] >= (mr_losses[-1] + kp_losses[-1]):
+                best_combined.update({
+                    "val": (mr_losses[-1] + kp_losses[-1]),
+                    "images": images,
+                    "segmentations": segmentations,
+                    "keypoints": keypoints,
+                    "verts": val_result["generated_verts"],
+                    "kps": val_result["generated_kps"],
+                    "cams": val_result["generated_cams"]
+                })
+            if worst_combined["val"] <= (mr_losses[-1] + kp_losses[-1]):
+                worst_combined.update({
+                    "val": (mr_losses[-1] + kp_losses[-1]),
+                    "images": images,
+                    "segmentations": segmentations,
+                    "keypoints": keypoints,
+                    "verts": val_result["generated_verts"],
+                    "kps": val_result["generated_kps"],
+                    "cams": val_result["generated_cams"]
+                })
+
+        result_dicts = [best_kp, worst_kp, best_mr, worst_mr, best_combined, worst_combined]
+        writer = tf.summary.create_file_writer(join(self.logs, self.checkpoint_dir))
+        with writer.as_default():
+            step = 0
+            for d in result_dicts:
+                print(d["images"].shape)
+                self.draw_results(d["images"], d["segmentations"], d["keypoints"], d["verts"], d["kps"], d["cams"], step)
+                writer.flush()
+                step += 1
         print(kp_losses)
         print(mr_losses)
         print("average kp_loss =", np.mean(kp_losses))
         print("average mr_loss =", np.mean(mr_losses))
-

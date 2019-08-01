@@ -39,7 +39,7 @@ flags.DEFINE_string('load_path', None, 'path to trained model')
 flags.DEFINE_string('pretrained_model_path',
                     '/home/valentin/Code/ADL/human-pose-estimation/resnet_v2_50.ckpt',
                     'if not None, fine-tunes from this ckpt')
-flags.DEFINE_integer('batch_size', 8,
+flags.DEFINE_integer('batch_size', 1,
                      'Input image size to the network after preprocessing')
 
 # Don't change if testing:
@@ -60,12 +60,14 @@ DATA_DIR = '/home/valentin/Code/ADL/human-pose-estimation/datasets'
 flags.DEFINE_string('data_dir', DATA_DIR, 'Where to save training models')
 flags.DEFINE_string('logs', 'logs', 'Where to save training models')
 flags.DEFINE_string('model_dir', None, 'Where model will be saved -- filled automatically')
-flags.DEFINE_integer('validation_step_size', 500, 'How often to visualize img during training')
-flags.DEFINE_integer('log_img_step', 500, 'How often to visualize img during training')
+flags.DEFINE_integer('validation_step_size', 50, 'How often to visualize img during training')
+flags.DEFINE_integer('log_img_step', 1000, 'How often to visualize img during training')
 flags.DEFINE_float('train_val_split', 0.5, 'train_val_split')
-flags.DEFINE_integer('epoch', 60, '# of epochs to train')
+flags.DEFINE_integer('epoch', 125, '# of epochs to train')
 
-flags.DEFINE_list('datasets', ['lsp'],
+flags.DEFINE_list('datasets', ['lsp_train', 'lsp_ext'],
+                          'datasets to use for training')
+flags.DEFINE_list('val_datasets', ['lsp_val'],
                           'datasets to use for training')
 #flags.DEFINE_list('datasets', ['lsp', 'lsp_ext', 'mpii', 'coco'],
 #                          'datasets to use for training')
@@ -82,20 +84,23 @@ flags.DEFINE_boolean(
 flags.DEFINE_boolean(
     'encoder_only', False,
     'if set, no adversarial prior is trained = monsters')
-
+flags.DEFINE_boolean(
+    'use_gradient_penalty', True,
+    'if set, no adversarial prior is trained = monsters')
 flags.DEFINE_boolean(
     'use_3d_label', False,
     'Uses 3D labels if on.')
 
+flags.DEFINE_string('checkpoint_dir', "checkpoints_critic_kp_only_125", 'checkpoint folder')
 # Hyper parameters:
 flags.DEFINE_float('generator_lr', 0.0001, 'Encoder learning rate')
-flags.DEFINE_float('critic_lr', 0.001, 'Adversarial prior learning rate')
+flags.DEFINE_float('critic_lr', 0.0005, 'Adversarial prior learning rate')
 flags.DEFINE_float('e_wd', 0.0001, 'Encoder weight decay')
 flags.DEFINE_float('d_wd', 0.0001, 'Adversarial prior weight decay')
 
 flags.DEFINE_float('generator_loss_weight', 60, 'weight on E_kp losses')
 flags.DEFINE_float('mr_loss_weight', 0.001, 'weight on mesh reprojection loss')
-flags.DEFINE_float('critic_loss_weight', 1, 'weight on discriminator')
+flags.DEFINE_float('critic_loss_weight', 0.01, 'weight on discriminator')
 
 
 flags.DEFINE_float('e_3d_weight', 1, 'weight on E_3d')
@@ -204,11 +209,19 @@ def prepare_dirs(config, prefix=['HMR']):
             if config.critic_loss_weight != 1:
                 postfix.append("d-weight%g" % config.critic_loss_weight)
 
+        if config.use_mesh_repro_loss:
+            postfix.append("mr")
+
+        if config.use_kp_loss:
+            postfix.append("kp")
+
         if config.use_3d_label:
             print('Using 3D labels!!')
             prefix.append("3DSUP")
             if config.e_3d_weight != 1:
                 postfix.append("3dsup-weight%g" % config.e_3d_weight)
+
+        prefix.append("_%de_" % config.epoch)
 
         # Data:
         # Jitter amount:
