@@ -33,7 +33,6 @@ def main(config):
       except RuntimeError as e:
         # Memory growth must be set before GPUs have been initialized
         print(e)
-    prepare_dirs(config)
 
     # Load data on CPU
     with tf.device("/cpu:0"):
@@ -44,7 +43,8 @@ def main(config):
 
 #    iterator = dataset.make_one_shot_iterator()
 
-    :onfig.checkpoint_dir = "training_checkpoints_kp_only"
+    config.use_mesh_repro_loss = True
+    config.use_kp_loss = True
     trainer = HMRTrainer(config, dataset, smpl_loader, val_dataset)
     trainer.validate_checkpoint()
 
