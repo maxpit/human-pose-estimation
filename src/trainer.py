@@ -10,7 +10,7 @@ from __future__ import print_function
 
 from .data_loader import num_examples
 
-from .ops import keypoint_l1_loss, compute_3d_loss, align_by_pelvis, mesh_reprojection_loss
+from .ops import joint_reprojection_loss, mesh_reprojection_loss
 from .models import Critic_network, Encoder_resnet, Encoder_fc3_dropout, precompute_C_matrix, get_kcs
 
 from .tf_smpl.batch_lbs import batch_rodrigues
@@ -285,7 +285,7 @@ class HMRTrainer(object):
             # For visulalization
             all_pred_kps.append(tf.gather(pred_kp, self.show_these))
             kp_losses.append(
-                self.generator_kp_loss_weight * keypoint_l1_loss(kp2d_gts, pred_kp,
+                self.generator_kp_loss_weight * joint_reprojection_loss(kp2d_gts, pred_kp,
                                                                  name='val_kp_loss')
             )
 
@@ -454,7 +454,7 @@ class HMRTrainer(object):
                 # For visulalization
                 all_pred_kps.append(tf.gather(pred_kp, self.show_these))
                 kp_losses.append(
-                    self.generator_kp_loss_weight * keypoint_l1_loss(kp2d_gts, pred_kp)
+                    self.generator_kp_loss_weight * joint_reprojection_loss(kp2d_gts, pred_kp)
                 )
 
                 if self.use_mesh_repro_loss:
@@ -522,7 +522,7 @@ class HMRTrainer(object):
                 #kp_gt = tf.ones_like(pred_kp)
                 #loss = tf.linalg.norm(pred_kp-kp_gt) # works
 
-                #loss = self.generator_kp_loss_weight * keypoint_l1_loss(small_kps, pred_kp) # works
+                #loss = self.generator_kp_loss_weight * joint_reprojection_loss(small_kps, pred_kp) # works
 
             #loss = kp_losses[-1]
             #print(loss)
