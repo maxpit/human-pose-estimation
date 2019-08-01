@@ -54,12 +54,15 @@ class SMPLRenderer(object):
         if cam is None:
             cam = [self.flength, w / 2., h / 2.]
 
-        use_cam = ProjectPoints(
-            f=cam[0] * np.ones(2),
-            rt=np.zeros(3),
-            t=np.zeros(3),
-            k=np.zeros(5),
-            c=cam[1:3])
+        if isinstance(cam, ProjectPoints):
+            use_cam = cam
+        else:
+            use_cam = ProjectPoints(
+                f=cam[0] * np.ones(2),
+                rt=np.zeros(3),
+                t=np.zeros(3),
+                k=np.zeros(5),
+                c=cam[1:3])
 
         if near is None:
             near = np.maximum(np.min(verts[:, 2]) - 25, 0.1)
