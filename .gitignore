@@ -8,3 +8,4 @@ data/
 *.bk
 .ipynb_checkpoints/
 *.ipynb
+*checkpoint*
