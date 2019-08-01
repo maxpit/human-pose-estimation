@@ -46,7 +46,29 @@ def main(config):
 
 #    iterator = dataset.make_one_shot_iterator()
 
-    config.checkpoint_dir = "training_checkpoints_55_epochs_lspe"
+    config.encoder_only = False
+    config.use_mesh_repro_loss = True
+    config.use_kp_loss = False
+
+    prepare_dirs(config)
+    trainer = HMRTrainer(config, dataset, smpl_loader, val_dataset)
+    save_config(config)
+    trainer.train()
+
+    config.encoder_only = False
+    config.use_mesh_repro_loss = False
+    config.use_kp_loss = True
+
+    prepare_dirs(config)
+    trainer = HMRTrainer(config, dataset, smpl_loader, val_dataset)
+    save_config(config)
+    trainer.train()
+
+    config.encoder_only = False
+    config.use_mesh_repro_loss = True
+    config.use_kp_loss = True
+
+    prepare_dirs(config)
     trainer = HMRTrainer(config, dataset, smpl_loader, val_dataset)
     save_config(config)
     trainer.train()
