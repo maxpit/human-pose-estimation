@@ -28,7 +28,7 @@ def load_mat(fname):
 
 def _add_to_tfrecord(img_path, gt_path, label, writer, is_lsp_ext=False, is_mpii=False):
 
-    if is_lsp_ext:
+    if is_lsp_ext:# or is_mpii:
         visible = label[2, :].astype(bool)
     else:
         visible = np.logical_not(label[2, :])
@@ -44,10 +44,10 @@ def _add_to_tfrecord(img_path, gt_path, label, writer, is_lsp_ext=False, is_mpii
     with tf.io.gfile.GFile(gt_path, 'rb') as f:
         seg_data = f.read()
 
-    img = tf.image.decode_jpeg(image_data)
+
     # lsp ext segentation data has 3 channels so reducing it to one to match lsp
+    seg_gt = tf.image.decode_jpeg(seg_data)
     if is_lsp_ext or is_mpii:
-        seg_gt = tf.image.decode_jpeg(seg_data)
         seg_gt = tf.expand_dims(seg_gt[:,:,0], 2)
         seg_data = tf.image.encode_jpeg(seg_gt).numpy()
     #print("image", len(image_data))
@@ -60,18 +60,23 @@ def _add_to_tfrecord(img_path, gt_path, label, writer, is_lsp_ext=False, is_mpii
     #+gt = np.array(io.imread(gt_path))
     #gt = coder.decode_jpeg(seg_data)
 
-    #f, axarr = plt.subplots(1,2)
-    #seg_gt = tf.concat([seg_gt, seg_gt, seg_gt], axis=2)
-    #plt.imshow(seg_gt)
+    img = tf.image.decode_jpeg(image_data)
+    #plt.imshow(img)
+    #print(label[0,visible])
+    #print(label[1,visible])
     #plt.scatter(x=label[0,:], y=label[1,:], c=['C0', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7',
-    #                                           'C8', 'C9', 'b', 'g', 'r', 'y'], s=4)
-    #axarr[1].imshow(seg_gt)
+                                               #'C8', 'C9', 'b', 'g', 'r', 'y'], s=20)
+    #plt.scatter(x=label[0,visible], y=label[1,visible], s=60, c='r', marker='x')
+    ##axarr[1].imshow(seg_gt)
     #plt.show()
-    #img_raw = img.tostring()
+    ##f, axarr = plt.subplots(1,2)
+    #seg_gt = tf.concat([seg_gt, seg_gt, seg_gt], axis=2)
+    ##img_raw = img.tostring()
     #gt_raw = gt.tostring()
     add_face = False
     if label.shape[1] == 19:
         add_face = True
+        print("taking only face points")
         # Split and save facepts on it's own.
         face_pts = label[:, 14:]
         label = label[:, :14]
@@ -131,6 +136,7 @@ def create (tfrecords_filename, filename_pairs, dataset="lsp"):
     else:
         is_mpii = True
         labels = np.load(mpii_poses_dir)['poses']
+        print(labels.shape)
         # Mapping from MPII joints to LSP joints (0:13). In this roder:
         _COMMON_JOINT_IDS = [
             0,  # R ankle
@@ -157,7 +163,9 @@ def create (tfrecords_filename, filename_pairs, dataset="lsp"):
     for i in range(len(filename_pairs)):
         current_file = int(re.findall('\d+',filename_pairs[i][0])[0])
         if is_mpii:
-            current_file = i+1
+            current_file = int(re.findall('\d+',filename_pairs[i][0])[1])
+            print("current_file",current_file)
+            print("label", labels[:,:,current_file-1])
         _add_to_tfrecord(
                 filename_pairs[i][0],
                 filename_pairs[i][1],
