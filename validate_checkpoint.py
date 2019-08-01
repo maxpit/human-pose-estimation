@@ -37,17 +37,12 @@ def main(config):
     # Load data on CPU
     with tf.device("/cpu:0"):
         data_loader = DataLoader(config)
-        dataset = data_loader.load()
-        smpl_loader = data_loader.get_smpl_loader()
         val_dataset = data_loader.load_val_dataset()
-
-#    iterator = dataset.make_one_shot_iterator()
 
     config.use_mesh_repro_loss = True
     config.use_kp_loss = True
-    trainer = HMRTrainer(config, dataset, smpl_loader, val_dataset)
-    trainer.validate_checkpoint()
-
+    trainer = HMRTrainer(config, None, None, val_dataset, validation_only=True)
+    trainer.validate_checkpoint(draw_every_image=True)
 
 if __name__ == '__main__':
     config = flags.FLAGS

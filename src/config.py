@@ -75,22 +75,19 @@ flags.DEFINE_list('mocap_datasets', ['CMU', 'jointLim'],
                   'datasets to use for adversarial prior training')
 
 # Model config
-flags.DEFINE_boolean(
-    'use_mesh_repro_loss', False,
+flags.DEFINE_boolean( 'use_mesh_repro_loss', False,
     'use mesh reprojection loss')
-flags.DEFINE_boolean(
-    'use_kp_loss', True,
+flags.DEFINE_boolean( 'use_kp_loss', True,
     'use mesh reprojection loss')
-flags.DEFINE_boolean(
-    'encoder_only', False,
+flags.DEFINE_boolean( 'encoder_only', False,
     'if set, no adversarial prior is trained = monsters')
-flags.DEFINE_boolean(
-    'use_gradient_penalty', True,
+flags.DEFINE_boolean( 'use_gradient_penalty', True,
     'if set, no adversarial prior is trained = monsters')
-flags.DEFINE_boolean(
-    'use_3d_label', False,
-    'Uses 3D labels if on.')
+flags.DEFINE_boolean( 'use_3d_label', False, 'Uses 3D labels if on.')
+flags.DEFINE_boolean( 'use_rotation', True, 'Uses 3D labels if on.')
+flags.DEFINE_boolean( 'use_validation', True, 'Uses 3D labels if on.')
 
+flags.DEFINE_boolean( 'train_from_checkpoint', False, 'Uses 3D labels if on.')
 flags.DEFINE_string('checkpoint_dir', "checkpoints_critic_kp_only_125", 'checkpoint folder')
 # Hyper parameters:
 flags.DEFINE_float('generator_lr', 0.0001, 'Encoder learning rate')
