@@ -38,17 +38,19 @@ from .util import renderer as vis_util
 #from .util.data_utils import get_silhouette_from_seg_im as get_sil
 
 class HMRTrainer(object):
-    def __init__(self, config, dataset, mocap_dataset = None, val_dataset=None):
-        """
-        Args:
-          config
-          if no 3D label is available,
-              data_loader is a dict
-          else
-              data_loader is a dict
-        mocap_dataset is a tuple (pose, shape)
-        """
-
+    """
+    Args:
+      config
+      if no 3D label is available,
+          data_loader is a dict
+      else
+          data_loader is a dict
+    mocap_dataset is a tuple (pose, shape)
+    """
+    def __init__(self, config, dataset = None,
+                               mocap_dataset = None,
+                               val_dataset=None,
+                               validation_only=False):
         #######################################################################################
         # Get config information
         #######################################################################################
@@ -60,8 +62,9 @@ class HMRTrainer(object):
         self.pretrained_model_path = config.pretrained_model_path
         self.encoder_only = config.encoder_only
         self.use_3d_label = config.use_3d_label
-        self.use_rotation = True #config.use_rotation
-        self.use_validation = True#config.use_validation
+        self.use_rotation = config.use_rotation
+        self.use_validation = config.use_validation
+        self.train_from_checkpoint = config.train_from_checkpoint
         # Data size
         self.img_size = config.img_size
         #print(self.img_size)
@@ -131,17 +134,12 @@ class HMRTrainer(object):
             img_size=self.img_size,
             face_path=config.smpl_face_path)
 
-        # Initialise the tensorboard writers
-        #self.training_writer = tf.summary.create_file_writer(self.model_dir + 'training')
-        #self.val_writer = tf.summary.create_file_writer(self.model_dir+'validation')
-
         self.theta_prev = self.load_mean_param()
-#        if self.use_3d_label:
-#            self.poseshape_loader = data_loader['label3d']
-#            # image_loader[3] is N x 2, first column is 3D_joints gt existence,
-#            # second column is 3D_smpl gt existence
-#            self.has_gt3d_joints = data_loader['has3d'][:, 0]
-#            self.has_gt3d_smpl = data_loader['has3d'][:, 1]
+
+        if not validation_only:
+            # Initialise the tensorboard writers
+            self.training_writer = tf.summary.create_file_writer(self.model_dir + 'training')
+            self.val_writer = tf.summary.create_file_writer(self.model_dir+'validation')
 
         #######################################################################################
         # Print train information
@@ -163,38 +161,27 @@ class HMRTrainer(object):
         #######################################################################################
         # Load data sets 
         #######################################################################################
-
-        # Create train and validation dataset from dataset with given train/val
-        # split
-
         self.full_dataset = []
-#TODO no validation at the moment...
-#        if config.use_validation:
-#            num_train_samples = int(num_images * config.train_val_split)
-#
-#            print("NUM_TRAIN_SAMPLES:",num_train_samples)
-#            train_set = dataset.take(num_train_samples).shuffle(buffer_size=10000).repeat()
-#            val_set = dataset.skip(num_train_samples).shuffle(buffer_size=10000).repeat()
-#
-#            train_set = train_set.batch(self.batch_size)
-#            val_set = val_set.batch(self.batch_size)
-#
-#            self.full_dataset.append(train_set)
-#        else:
-        dataset = dataset.shuffle(buffer_size=10000).repeat()
-        dataset = dataset.batch(self.batch_size)
-        self.full_dataset.append(dataset)
 
-        critic_dataset = mocap_dataset.shuffle(buffer_size=10000).repeat()
-        critic_dataset = critic_dataset.batch(self.batch_size*3)
-        self.full_dataset.append(critic_dataset)
+        if dataset is not None:
+            dataset = dataset.shuffle(buffer_size=10000).repeat()
+            dataset = dataset.batch(self.batch_size)
+            self.full_dataset.append(dataset)
+
+        if mocap_dataset is not None:
+            critic_dataset = mocap_dataset.shuffle(buffer_size=10000).repeat()
+            critic_dataset = critic_dataset.batch(self.batch_size*self.num_stage)
+            self.full_dataset.append(critic_dataset)
 
         if val_dataset is not None:
-            #val_dataset = val_dataset.shuffle(buffer_size=1000).repeat()
+            if not validation_only:
+                val_dataset = val_dataset.shuffle(buffer_size=1000).repeat()
             self.val_dataset = val_dataset.batch(self.batch_size)
             self.full_dataset.append(self.val_dataset)
         else:
+            # add dummy data
             self.full_dataset.append(tf.data.Dataset.range(2000).repeat())
+
         # create one dataset so its easier to iterate over it
         self.full_dataset = tf.data.Dataset.zip(tuple(self.full_dataset))
 
@@ -204,7 +191,6 @@ class HMRTrainer(object):
 
         # Initialize optimizers
         self.generator_optimizer = tf.keras.optimizers.Adam(self.generator_lr)
-        #self.critic_optimizer = tf.keras.optimizers.RMSprop(self.critic_lr)
         self.critic_optimizer = tf.keras.optimizers.Adam(self.critic_lr)
 
         # Load models
@@ -220,23 +206,6 @@ class HMRTrainer(object):
                                          generator3d=self.generator3d,
                                          discriminator=self.critic_network,
                                          inital_theta=self.theta_prev)
-
-    def use_pretrained(self):
-        """
-        Returns true only if:
-          1. model_type is "resnet"
-          2. pretrained_model_path is not None
-          3. model_dir is NOT empty, meaning we're picking up from previous
-             so fuck this pretrained model.
-        """
-        if ('resnet' in self.model_type) and (self.pretrained_model_path is
-                                              not None):
-            # Check is model_dir is empty
-            import os
-            if os.listdir(self.model_dir) == []:
-                return True
-
-        return False
 
 
     def load_mean_param(self):
@@ -264,7 +233,6 @@ class HMRTrainer(object):
         return mean_var
 
 
-    # Notice the use of `tf.function`
     # This annotation causes the function to be "compiled".
     #@tf.function
     def val_step(self, images, seg_gts, kp2d_gts):
@@ -835,9 +803,10 @@ class HMRTrainer(object):
         itr = 0
         epoch = 0
 
-        #print("restore checkpoint")
-        #print(self.checkpoint.restore(tf.train.latest_checkpoint(self.checkpoint_dir)))
-        #print("checkpoint restored")
+        if self.train_from_checkpoint:
+            print("restore checkpoint")
+            self.checkpoint.restore(tf.train.latest_checkpoint(self.checkpoint_dir))
+            print("checkpoint restored")
 
         for data_gen, data_critic, val_data in self.full_dataset:
             images, segmentations, keypoints = data_gen
@@ -925,19 +894,22 @@ class HMRTrainer(object):
                 print("epoch", epoch)
         print('Finish training on %s' % self.model_dir)
 
-    def validate_checkpoint(self):
+    def validate_checkpoint(self,draw_best_worst = False, draw_every_image = False):
         self.mean_var = self.load_mean_param()
         print(self.checkpoint.restore(tf.train.latest_checkpoint(self.checkpoint_dir)).expect_partial())
 
         kp_losses = []
         mr_losses = []
         step = 0
-        best_kp = {"val": 10}
-        best_mr = {"val": 100}
-        worst_kp = {"val": 0}
-        worst_mr = {"val": 0}
-        best_combined = {"val": 100}
-        worst_combined = {"val": 0}
+        if draw_best_worst:
+            best_kp = {"val": 10}
+            best_mr = {"val": 100}
+            worst_kp = {"val": 0}
+            worst_mr = {"val": 0}
+            best_combined = {"val": 100}
+            worst_combined = {"val": 0}
+
+        writer = tf.summary.create_file_writer(join(self.logs, self.checkpoint_dir))
 
         for images, segmentations, keypoints in self.val_dataset:
             step += 1
@@ -946,79 +918,85 @@ class HMRTrainer(object):
             kp_losses.append(val_result["kp_losses"][-1])
             mr_losses.append(val_result["mr_losses"][-1])
 
-            if best_kp["val"] >= kp_losses[-1]:
-                best_kp.update({
-                    "val": kp_losses[-1],
-                    "images": images,
-                    "segmentations": segmentations,
-                    "keypoints": keypoints,
-                    "verts": val_result["generated_verts"],
-                    "kps": val_result["generated_kps"],
-                    "cams": val_result["generated_cams"]
-                })
+            if draw_every_image:
+                with writer.as_default():
+                    self.draw_results(images, segmentations, keypoints, val_result["generated_verts"],
+                                      val_result["generated_kps"],val_result["generated_cams"],step)
+                    writer.flush()
 
-            if worst_kp["val"] <= kp_losses[-1]:
-                worst_kp.update({
-                    "val": kp_losses[-1],
-                    "images": images,
-                    "segmentations": segmentations,
-                    "keypoints": keypoints,
-                    "verts": val_result["generated_verts"],
-                    "kps": val_result["generated_kps"],
-                    "cams": val_result["generated_cams"]
-                })
+            if draw_best_worst:
+                if best_kp["val"] >= kp_losses[-1]:
+                    best_kp.update({
+                        "val": kp_losses[-1],
+                        "images": images,
+                        "segmentations": segmentations,
+                        "keypoints": keypoints,
+                        "verts": val_result["generated_verts"],
+                        "kps": val_result["generated_kps"],
+                        "cams": val_result["generated_cams"]
+                    })
 
-            if best_mr["val"] >= mr_losses[-1]:
-                best_mr.update({
-                    "val": mr_losses[-1],
-                    "images": images,
-                    "segmentations": segmentations,
-                    "keypoints": keypoints,
-                    "verts": val_result["generated_verts"],
-                    "kps": val_result["generated_kps"],
-                    "cams": val_result["generated_cams"]
-                })
-            if worst_mr["val"] <= mr_losses[-1]:
-                worst_mr.update({
-                    "val": mr_losses[-1],
-                    "images": images,
-                    "segmentations": segmentations,
-                    "keypoints": keypoints,
-                    "verts": val_result["generated_verts"],
-                    "kps": val_result["generated_kps"],
-                    "cams": val_result["generated_cams"]
-                })
+                if worst_kp["val"] <= kp_losses[-1]:
+                    worst_kp.update({
+                        "val": kp_losses[-1],
+                        "images": images,
+                        "segmentations": segmentations,
+                        "keypoints": keypoints,
+                        "verts": val_result["generated_verts"],
+                        "kps": val_result["generated_kps"],
+                        "cams": val_result["generated_cams"]
+                    })
 
-            if best_combined["val"] >= (mr_losses[-1] + kp_losses[-1]):
-                best_combined.update({
-                    "val": (mr_losses[-1] + kp_losses[-1]),
-                    "images": images,
-                    "segmentations": segmentations,
-                    "keypoints": keypoints,
-                    "verts": val_result["generated_verts"],
-                    "kps": val_result["generated_kps"],
-                    "cams": val_result["generated_cams"]
-                })
-            if worst_combined["val"] <= (mr_losses[-1] + kp_losses[-1]):
-                worst_combined.update({
-                    "val": (mr_losses[-1] + kp_losses[-1]),
-                    "images": images,
-                    "segmentations": segmentations,
-                    "keypoints": keypoints,
-                    "verts": val_result["generated_verts"],
-                    "kps": val_result["generated_kps"],
-                    "cams": val_result["generated_cams"]
-                })
+                if best_mr["val"] >= mr_losses[-1]:
+                    best_mr.update({
+                        "val": mr_losses[-1],
+                        "images": images,
+                        "segmentations": segmentations,
+                        "keypoints": keypoints,
+                        "verts": val_result["generated_verts"],
+                        "kps": val_result["generated_kps"],
+                        "cams": val_result["generated_cams"]
+                    })
+                if worst_mr["val"] <= mr_losses[-1]:
+                    worst_mr.update({
+                        "val": mr_losses[-1],
+                        "images": images,
+                        "segmentations": segmentations,
+                        "keypoints": keypoints,
+                        "verts": val_result["generated_verts"],
+                        "kps": val_result["generated_kps"],
+                        "cams": val_result["generated_cams"]
+                    })
 
-        result_dicts = [best_kp, worst_kp, best_mr, worst_mr, best_combined, worst_combined]
-        writer = tf.summary.create_file_writer(join(self.logs, self.checkpoint_dir))
-        with writer.as_default():
-            step = 0
-            for d in result_dicts:
-                print(d["images"].shape)
-                self.draw_results(d["images"], d["segmentations"], d["keypoints"], d["verts"], d["kps"], d["cams"], step)
-                writer.flush()
-                step += 1
+                if best_combined["val"] >= (mr_losses[-1] + kp_losses[-1]):
+                    best_combined.update({
+                        "val": (mr_losses[-1] + kp_losses[-1]),
+                        "images": images,
+                        "segmentations": segmentations,
+                        "keypoints": keypoints,
+                        "verts": val_result["generated_verts"],
+                        "kps": val_result["generated_kps"],
+                        "cams": val_result["generated_cams"]
+                    })
+                if worst_combined["val"] <= (mr_losses[-1] + kp_losses[-1]):
+                    worst_combined.update({
+                        "val": (mr_losses[-1] + kp_losses[-1]),
+                        "images": images,
+                        "segmentations": segmentations,
+                        "keypoints": keypoints,
+                        "verts": val_result["generated_verts"],
+                        "kps": val_result["generated_kps"],
+                        "cams": val_result["generated_cams"]
+                    })
+
+        if draw_best_worst:
+            result_dicts = [best_kp, worst_kp, best_mr, worst_mr, best_combined, worst_combined]
+            with writer.as_default():
+                step = 0
+                for d in result_dicts:
+                    self.draw_results(d["images"], d["segmentations"], d["keypoints"], d["verts"], d["kps"], d["cams"], step)
+                    writer.flush()
+                    step += 1
         print(kp_losses)
         print(mr_losses)
         print("average kp_loss =", np.mean(kp_losses))
