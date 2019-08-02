@@ -9,40 +9,40 @@ We reused a lot of code from their repository but changed everything to use tens
 
 ### Changerecord
 #### New files
- - src/predictor.py
+ - `src/predictor.py`
 	Used for inference, was mainly copied from our reworked src/trainer.py
- - src/util/create\_dataset.py
+ - `src/util/create_dataset.py`
 	Used to create the tfrecords files for the different datasets.
- - src/util/data\_utils.py
+ - `src/util/data_utils.py`
 	Utils containing methos for converting data into tfrecords
- - preview.py
+ - `preview.py`
 	A webcam demo that uses a pretrained model and visulizes the results
- - train.py
+ - `train.py`
 	Used for training the network
- - validate\_checkpoint.py
+ - `validate_checkpoint.py`
 	Can be used get validation scores on the validation set for a given checkpoint
- - All files in src/visualizations which can be used to visualize the different datasets
+ - All files in `src/visualizations` which can be used to visualize the different datasets
 
 #### Files changed a lot
- - src/trainer.py
+ - `src/trainer.py`
 	Due to changes in the dataloader and the change to eager execution and tf2 most of the code here needed to be rewritten
- - src/models.py
+ - `src/models.py`
 	Added the critic network
- - src/ops.py
+ - `src/ops.py`
 	Added the mesh reprojection loss
- - src/tf\_smpl/projection.py
+ - `src/tf_smpl/projection.py`
 	Added mesh reprojection
 
 #### Files changed a little
- - src/config.py
+ - `src/config.py`
 	Added new config parameters and removed unused ones
- - src/data\_loader.py
+ - `src/data_loader.py`
 	Changed to the tensorflow Dataloader API and made changes to accomodate for the additional input data needed (segmentation gt)
 
 #### No significant changes except for updating to tf2
- - All files in src/tf\_smpl/ except projection.py
- - src/util/renderer.py
- - src/util/image.py
+ - All files in `src/tf_smpl/` except projection.py
+ - `src/util/renderer.py`
+ - `src/util/image.py`
 
 ## Requirements
 - Python 3.5
