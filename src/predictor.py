@@ -35,13 +35,10 @@ class Predictor(object):
         self.pretrained_model_path = config.pretrained_model_path
         # Data size
         self.img_size = config.img_size
-        #print(self.img_size)
         self.num_stage = config.num_stage
         self.batch_size = config.batch_size
         # Data
         self.checkpoint_dir = config.checkpoint_dir
-        # Model spec
-        self.model_type = config.model_type
 
         self.num_joints = 14
 
@@ -75,7 +72,7 @@ class Predictor(object):
         # Load models
         self.image_feature_extractor = EncoderNetwork()
         self.generator3d = RegressionNetwork()
-        self.critic_network = CriticNetwork(use_rotation=True)
+        self.critic_network = CriticNetwork()
 
         #Restore checkpoint
         self.checkpoint_prefix = os.path.join(self.checkpoint_dir, "ckpt")
