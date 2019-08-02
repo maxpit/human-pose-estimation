@@ -25,6 +25,7 @@ def num_examples(datasets):
         'lsp_single': 1,
         'lsp_single_new': 1,
         'single_new_try': 1,
+        'lsp_16': 16,
         'lsp_32': 32,
         'CMU': 3934267,
         'jointLim': 181968,
