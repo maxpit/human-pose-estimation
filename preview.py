@@ -16,11 +16,11 @@ from src.util import openpose as op_util
 import src.config as config
 from src.config import get_config, prepare_dirs, save_config
 import deepdish as dd
-from opendr.renderer import ColoredRenderer 
-from opendr.lighting import LambertianPointLight 
-from opendr.camera import ProjectPoints 
+from opendr.renderer import ColoredRenderer
+from opendr.lighting import LambertianPointLight
+from opendr.camera import ProjectPoints
 from src.tf_smpl.batch_smpl import SMPL
-from src.predictor import HMRPredictor
+from src.predictor import Predictor
 from os.path import join, dirname
 #import src.util.data_utils as du
 
@@ -63,7 +63,7 @@ def main(config):
         face_path=config.smpl_face_path)
 
     config.checkpoint_dir = "training_checkpoints_125_epochs_lspe"
-    predictor = HMRPredictor(config)
+    predictor = Predictor(config)
     cv2.namedWindow("preview", cv2.WINDOW_NORMAL)
     cv2.setWindowProperty("preview", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
     vc = cv2.VideoCapture(0)

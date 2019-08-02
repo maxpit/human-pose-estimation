@@ -1,6 +1,6 @@
 """
-HMR trainer.
-From an image input, trained a model that outputs 85D latent vector
+Predictor
+Use a pretrained model to predict SMPL parameters from a 2D image
 consisting of [cam (3 - [scale, tx, ty]), pose (72), shape (10)]
 """
 
@@ -35,9 +35,8 @@ import deepdish as dd
 
 # For drawing
 from .util import renderer as vis_util
-#from .util.data_utils import get_silhouette_from_seg_im as get_sil
 
-class HMRPredictor(object):
+class Predictor(object):
     def __init__(self, config):
         #######################################################################################
         # Get config information
@@ -51,7 +50,7 @@ class HMRPredictor(object):
         self.img_size = config.img_size
         #print(self.img_size)
         self.num_stage = config.num_stage
-        self.batch_size = 1
+        self.batch_size = config.batch_size
         # Data
         self.checkpoint_dir = config.checkpoint_dir
         # Model spec
@@ -91,7 +90,7 @@ class HMRPredictor(object):
         self.generator3d = Encoder_fc3_dropout()
         self.critic_network = Critic_network(use_rotation=True)
 
-        print("checkpoint")
+        #Restore checkpoint
         self.checkpoint_prefix = os.path.join(self.checkpoint_dir, "ckpt")
         self.checkpoint = tf.train.Checkpoint(generator_optimizer=self.generator_optimizer,
                                          discriminator_optimizer=self.critic_optimizer,
@@ -100,7 +99,7 @@ class HMRPredictor(object):
                                          discriminator=self.critic_network,
                                          inital_theta=self.theta_prev)
         self.mean_var = self.load_mean_param()
-        print(self.checkpoint.restore(tf.train.latest_checkpoint(self.checkpoint_dir)).expect_partial())
+        self.checkpoint.restore(tf.train.latest_checkpoint(self.checkpoint_dir)).expect_partial()
 
     def load_mean_param(self):
         print("LOAD MEAN PARAM THETA")
@@ -127,8 +126,6 @@ class HMRPredictor(object):
         return mean_var
 
 
-    # Notice the use of `tf.function`
-    # This annotation causes the function to be "compiled".
     #@tf.function
     def predict(self, images):
         if self.data_format == 'NCHW':
@@ -143,7 +140,7 @@ class HMRPredictor(object):
         #Extract feature vector from image using resnet
         extracted_features = self.image_feature_extractor.predict(images)
         theta_prev = tf.tile(self.mean_var, [self.batch_size, 1])
-            # Main IEF loop
+        # Main IEF loop
         for i in range(self.num_stage):
             state = tf.concat([extracted_features, theta_prev], 1)
             delta_theta = self.generator3d.predict(state)
@@ -158,9 +155,7 @@ class HMRPredictor(object):
 
             # Rs_wglobal is Nx24x3x3 rotation matrices of poses
             generated_verts, generated_joints, generated_pred_Rs = self.smpl(generated_shapes, generated_poses, get_skin=True)
-            generated_pred_Rs = generated_pred_Rs[:,1:,:]
 
-            #For visualization
             all_pred_kps.append(generated_joints)
             all_pred_verts.append(generated_verts)
             all_pred_cams.append(generated_cams)
@@ -173,14 +168,12 @@ class HMRPredictor(object):
         #################################################################################################
         result = {}
 
-
         result["generated_joints"] = all_pred_kps[-1]
         result["generated_verts"] = all_pred_verts[-1]
         result["generated_cams"] = all_pred_cams[-1]
-
         return result
 
-    def do_prediction(self, image):
+    def predict_single_image(self, image):
         pred_results = self.predict(tf.expand_dims(image, axis=0))
 
         return pred_results["generated_verts"], pred_results["generated_cams"], pred_results["generated_joints"]
