@@ -6,18 +6,7 @@ import matplotlib.pyplot as plt
 
 from glob import glob
 from os.path import basename
-from os.path import join, dirname
 
-file_dir = '/home/valentin/Code/ADL/human-pose-estimation/data/'
-
-lsp_dir = file_dir + 'lsp/'
-lsp_e_dir = file_dir + 'lspet_dataset/'
-lsp_im = lsp_dir + 'images/'
-lsp_e_im = lsp_e_dir + 'images/'
-lsp_seg = file_dir + 'upi-s1h/data/lsp/'
-lsp_e_seg = file_dir + 'upi-s1h/data/lsp_extended/'
-mpii_dir = join(file_dir, 'upi-s1h/data/mpii/')
-mpii_poses_dir = join(mpii_dir, 'poses.npz')
 
 def load_mat(fname):
     import scipy.io as sio
@@ -49,28 +38,9 @@ def _add_to_tfrecord(img_path, gt_path, label, writer, is_lsp_ext=False, is_mpii
     if is_lsp_ext or is_mpii:
         seg_gt = tf.expand_dims(seg_gt[:,:,0], 2)
         seg_data = tf.image.encode_jpeg(seg_gt).numpy()
-    #print("image", len(image_data))
-    #print("seg", len(seg_data))
-    #print("label", label)
-    #print("center", center)
-    #print("width,height", img.shape)
-    #print("width,height", seg_gt.shape)
-    #img = np.array(io.imread(img_path))
-    #+gt = np.array(io.imread(gt_path))
 
     img = tf.image.decode_jpeg(image_data)
-    #plt.imshow(img)
-    #print(label[0,visible])
-    #print(label[1,visible])
-    #plt.scatter(x=label[0,:], y=label[1,:], c=['C0', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7',
-                                               #'C8', 'C9', 'b', 'g', 'r', 'y'], s=20)
-    #plt.scatter(x=label[0,visible], y=label[1,visible], s=60, c='r', marker='x')
-    ##axarr[1].imshow(seg_gt)
-    #plt.show()
-    ##f, axarr = plt.subplots(1,2)
-    #seg_gt = tf.concat([seg_gt, seg_gt, seg_gt], axis=2)
-    ##img_raw = img.tostring()
-    #gt_raw = gt.tostring()
+
     add_face = False
     if label.shape[1] == 19:
         add_face = True
@@ -117,13 +87,13 @@ def _int64_feature(value):
         value = [value]
     return tf.train.Feature(int64_list=tf.train.Int64List(value=value))
 
-def create (tfrecords_filename, filename_pairs, dataset="lsp"):
+def create (tconfig, frecords_filename, filename_pairs, dataset="lsp"):
     writer = tf.io.TFRecordWriter(tfrecords_filename)
     is_lsp_ext = False
     is_mpii = False
 
     if dataset == "lsp":
-        mat_dir = lsp_dir
+        mat_dir = config.lsp_dir
         # Load labels 3 x 14 x N
         labels = load_mat((mat_dir+'joints.mat'))
     elif dataset == "lsp_ext":
@@ -157,13 +127,10 @@ def create (tfrecords_filename, filename_pairs, dataset="lsp"):
     if labels.shape[0] != 3:
         labels = np.transpose(labels, (1, 0, 2))
 
-    print(labels.shape)
     for i in range(len(filename_pairs)):
         current_file = int(re.findall('\d+',filename_pairs[i][0])[0])
         if is_mpii:
             current_file = int(re.findall('\d+',filename_pairs[i][0])[1])
-            print("current_file",current_file)
-            print("label", labels[:,:,current_file-1])
         _add_to_tfrecord(
                 filename_pairs[i][0],
                 filename_pairs[i][1],
@@ -174,27 +141,16 @@ def create (tfrecords_filename, filename_pairs, dataset="lsp"):
 
     writer.close()
 
-def get_filename_pairs_single():
-    im1 = lsp_im + 'im0007.jpg'
-    seg1 = lsp_seg + 'im0007_segmentation.png'
-
-    filename_pair = [(im1, seg1)]
-
-    return filename_pair
-
-def get_filename_pairs_few(few_count = 9):
-    return get_filename_pairs_lsp()[:few_count]
-
-def get_filename_pairs_lsp():
-    all_images = sorted([f for f in glob((lsp_im+'*.jpg'))])
-    all_seg_gt = sorted([f for f in glob((lsp_seg+'im[0-9][0-9][0-9][0-9]_segmentation.png'))])
+def get_filename_pairs_lsp(config):
+    all_images = sorted([f for f in glob((config.lsp_im+'*.jpg'))])
+    all_seg_gt = sorted([f for f in glob((config.lsp_seg+'im[0-9][0-9][0-9][0-9]_segmentation.png'))])
     filename_pairs = tuple(np.vstack((all_images, all_seg_gt)).transpose())
 
     return filename_pairs
 
-def get_filename_pairs_lspe():
-    all_images = sorted([f for f in glob((lsp_e_im+'*.jpg'))])
-    all_seg_gt = sorted([f for f in glob((lsp_e_seg+'im[0-9][0-9][0-9][0-9][0-9]_segmentation.png'))])
+def get_filename_pairs_lspe(config):
+    all_images = sorted([f for f in glob((config.lsp_e_im+'*.jpg'))])
+    all_seg_gt = sorted([f for f in glob((config.lsp_e_seg+'im[0-9][0-9][0-9][0-9][0-9]_segmentation.png'))])
 
     ss = []
     for s in all_seg_gt:
@@ -206,10 +162,9 @@ def get_filename_pairs_lspe():
 
     return filename_pairs
 
-
-def get_filename_pairs_mpii():
-    all_images = sorted([f for f in glob((mpii_dir+'images/[0-9][0-9][0-9][0-9][0-9].png'))])
-    all_seg_gt = sorted([f for f in glob((mpii_dir+'images/[0-9][0-9][0-9][0-9][0-9]_segmentation.png'))])
+def get_filename_pairs_mpii(config):
+    all_images = sorted([f for f in glob((config.mpii_dir+'images/[0-9][0-9][0-9][0-9][0-9].png'))])
+    all_seg_gt = sorted([f for f in glob((config.mpii_dir+'images/[0-9][0-9][0-9][0-9][0-9]_segmentation.png'))])
     filename_pairs = tuple(np.vstack((all_images, all_seg_gt)).transpose())
 
     return filename_pairs
