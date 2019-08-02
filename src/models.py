@@ -31,7 +31,7 @@ import math
         Image:      N x H x W x 3
     
     Outputs:
-        features:   N x num_features (2133)
+        features:   N x num_features (2048)
 """
 def EncoderNetwork():
 
@@ -48,7 +48,7 @@ def EncoderNetwork():
     3 MLP layers (last is the output) with dropout on first 2.
     
     Input:
-        x:          N x num_features (2133)
+        x:          N x (num_features (2048) + |theta| (85) )
 
     Outputs:
         3D params:  N x num_output (85)

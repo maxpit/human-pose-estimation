@@ -123,3 +123,25 @@ def mesh_reprojection_loss(silhouette_gt, silhouette_pred, batch_size, name="mes
             else:
                 loss = loss + bi_loss_scaled
         return loss
+
+
+def compute_gradient_penalty(gradients, debug=False):
+
+    penalty_1 = tf.square(
+        1. - tf.norm(tf.reduce_mean(gradients[0], 0), ord='euclidean'))
+    penalty_2 = tf.square(
+        1. - tf.norm(tf.reduce_mean(gradients[1], 0), ord='euclidean'))
+    penalty_3 = tf.square(
+        1. - tf.norm(tf.reduce_mean(gradients[2], 0), ord='euclidean'))
+    penalty_4 = tf.square(
+        1. - tf.norm(tf.reduce_mean(gradients[3], 0), ord='euclidean'))
+    penalty = (penalty_1 + penalty_2 + penalty_3 + penalty_4)
+
+    if debug == True:
+        tf.print("penalty_1", penalty_1)
+        tf.print("penalty_2", penalty_2)
+        tf.print("penalty_3", penalty_3)
+        tf.print("penalty_4", penalty_4)
+        tf.print("penalty", penalty)
+
+    return penalty
