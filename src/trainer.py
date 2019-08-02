@@ -52,9 +52,7 @@ class Trainer(object):
         self.load_path = config.load_path
         self.data_format = config.data_format
         self.smpl_model_path = config.smpl_model_path
-        self.pretrained_model_path = config.pretrained_model_path
         self.encoder_only = config.encoder_only
-        self.use_3d_label = config.use_3d_label
         self.use_rotation = config.use_rotation
         self.use_validation = config.use_validation
         self.train_from_checkpoint = config.train_from_checkpoint
@@ -65,7 +63,7 @@ class Trainer(object):
         self.batch_size = config.batch_size
         self.max_epoch = config.epoch
         self.use_mesh_repro_loss = config.use_mesh_repro_loss
-        self.use_kp_loss= config.use_kp_loss
+        self.use_kpr_loss = config.use_kpr_loss
 
         # Data
         num_images = num_examples(config.datasets)
@@ -75,7 +73,7 @@ class Trainer(object):
         self.checkpoint_dir = config.checkpoint_dir
 
         # Gather loss weights
-        self.generator_kp_loss_weight = config.generator_loss_weight
+        self.kpr_loss_weight = config.kpr_loss_weight
         self.critic_loss_weight = config.critic_loss_weight
         self.mr_loss_weight = config.mr_loss_weight
 
@@ -145,9 +143,7 @@ class Trainer(object):
         print('load path: %s', self.load_path)
         print('data_format: %s', self.data_format)
         print('smpl_model_path: %s', self.smpl_model_path)
-        print('pretrained_model_path: %s', self.pretrained_model_path)
         print('encoder only:', self.encoder_only)
-        print('use_3d_label:', self.use_3d_label)
         print('image_size:', self.img_size)
         print('num_stage:', self.num_stage)
         print('batch_size:', self.batch_size)
@@ -237,7 +233,7 @@ class Trainer(object):
             images = tf.transpose(images, [0, 3, 1, 2])
             seg_gts = tf.transpose(seg_gts, [0, 3, 1, 2])
 
-        kp_losses = []
+        kpr_losses = []
         mr_losses = []
         all_pred_verts  = []
         all_pred_cams  = []
@@ -282,8 +278,8 @@ class Trainer(object):
                                                 name='val_proj2d_stage%d' % i)
             # For visulalization
             all_pred_kps.append(tf.gather(pred_kp, self.show_these))
-            kp_losses.append(
-                self.generator_kp_loss_weight * joint_reprojection_loss(kp2d_gts, pred_kp,
+            kpr_losses.append(
+                self.kpr_loss_weight * joint_reprojection_loss(kp2d_gts, pred_kp,
                                                                  name='val_kp_loss')
             )
 
@@ -327,8 +323,8 @@ class Trainer(object):
 
         # compute overall generator validation loss
         generator_loss_sum = 0.
-        if self.use_kp_loss:
-            generator_loss_sum += kp_losses[-1]
+        if self.use_kpr_loss:
+            generator_loss_sum += kpr_losses[-1]
         if self.use_mesh_repro_loss:
             generator_loss_sum += mr_losses[-1]
         if not self.encoder_only:
@@ -339,7 +335,7 @@ class Trainer(object):
         #################################################################################################
         result = {}
 
-        result["kp_losses"] = kp_losses
+        result["kpr_losses"] = kpr_losses
         if self.use_mesh_repro_loss:
             result["mr_losses"] = mr_losses
         all_pred_kps = tf.stack(all_pred_kps, axis=1)
@@ -380,7 +376,7 @@ class Trainer(object):
 
         fake_joints = []
         fake_shapes = []
-        kp_losses = []
+        kpr_losses = []
         mr_losses = []
         all_pred_verts  = []
         all_pred_cams  = []
@@ -438,7 +434,7 @@ class Trainer(object):
 
                 # For visualization
                 all_pred_kps.append(tf.gather(pred_kp, self.show_these))
-                kp_losses.append(self.generator_kp_loss_weight * joint_reprojection_loss(kp2d_gts, pred_kp))
+                kpr_losses.append(self.kpr_loss_weight * joint_reprojection_loss(kp2d_gts, pred_kp))
 
                 # calculate mesh reprojection loss
                 if self.use_mesh_repro_loss:
@@ -494,9 +490,9 @@ class Trainer(object):
 
             # compute overall generator loss
             generator_loss_sum = 0.
-            if self.use_kp_loss:
-                #generator_loss_sum.append(kp_losses[-1])
-                generator_loss_sum += kp_losses[-1]
+            if self.use_kpr_loss:
+                #generator_loss_sum.append(kpr_losses[-1])
+                generator_loss_sum += kpr_losses[-1]
             if self.use_mesh_repro_loss:
                 generator_loss_sum += mr_losses[-1]
             if not self.encoder_only:
@@ -600,7 +596,7 @@ class Trainer(object):
         #################################################################################################
         result = {}
 
-        result["kp_losses"] = kp_losses
+        result["kpr_losses"] = kpr_losses
         if self.use_mesh_repro_loss:
             result["mr_losses"] = mr_losses
         all_pred_kps = tf.stack(all_pred_kps, axis=1)

@@ -26,7 +26,6 @@ if not osp.exists(model_dir):
     import ipdb
     ipdb.set_trace()
 SMPL_MODEL_PATH = osp.join(model_dir, 'model.pkl')
-#SMPL_MODEL_PATH = osp.join(model_dir, 'neutral_smpl_with_cocoplus_reg.pkl')
 SMPL_FACE_PATH = osp.join(curr_path, '../src/tf_smpl', 'smpl_faces.npy')
 
 # Default pred-trained model path for the demo.
@@ -37,19 +36,15 @@ flags.DEFINE_string('smpl_model_path', SMPL_MODEL_PATH,
 flags.DEFINE_string('smpl_face_path', SMPL_FACE_PATH,
                     'path to smpl mesh faces (for easy rendering)')
 flags.DEFINE_string('load_path', None, 'path to trained model')
-flags.DEFINE_string('pretrained_model_path',
-                    '/home/valentin/Code/ADL/human-pose-estimation/resnet_v2_50.ckpt',
-                    'if not None, fine-tunes from this ckpt')
 flags.DEFINE_integer('batch_size', 1,
-                     'Input image size to the network after preprocessing')
+                     'batch size to use for training loop.')
 
 # Don't change if testing:
 flags.DEFINE_integer('img_size', 224,
-                     'Input image size to the network after preprocessing')
+                     'input image size to the network after preprocessing')
 flags.DEFINE_string('data_format', 'NHWC', 'Data format')
-flags.DEFINE_integer('num_stage', 3, '# of times to iterate regressor')
-flags.DEFINE_string('model_type', 'resnet_fc3_dropout',
-                    'Specifies which network to use')
+flags.DEFINE_integer('num_stage', 3, '# of times to iterate through RegressionNetwork')
+
 flags.DEFINE_string(
     'joint_type', 'lsp',
     'cocoplus (19 keypoints) or lsp 14 keypoints, returned by SMPL')
@@ -62,45 +57,40 @@ flags.DEFINE_string('logs', 'logs', 'Where to save training models')
 flags.DEFINE_string('model_dir', None, 'Where model will be saved -- filled automatically')
 flags.DEFINE_integer('validation_step_size', 50, 'How often to visualize img during training')
 flags.DEFINE_integer('log_img_step', 1000, 'How often to visualize img during training')
-flags.DEFINE_float('train_val_split', 0.5, 'train_val_split')
 flags.DEFINE_integer('epoch', 125, '# of epochs to train')
 
 flags.DEFINE_list('datasets', ['lsp_train', 'lsp_ext'],
                           'datasets to use for training')
 flags.DEFINE_list('val_datasets', ['lsp_val'],
                           'datasets to use for training')
-#flags.DEFINE_list('datasets', ['lsp', 'lsp_ext', 'mpii', 'coco'],
-#                          'datasets to use for training')
 flags.DEFINE_list('mocap_datasets', ['CMU', 'jointLim'],
                   'datasets to use for adversarial prior training')
 
 # Model config
-flags.DEFINE_boolean( 'use_mesh_repro_loss', False,
-    'use mesh reprojection loss')
-flags.DEFINE_boolean( 'use_kp_loss', True,
-    'use mesh reprojection loss')
-flags.DEFINE_boolean( 'encoder_only', False,
-    'if set, no adversarial prior is trained = monsters')
-flags.DEFINE_boolean( 'use_gradient_penalty', True,
-    'if set, no adversarial prior is trained = monsters')
-flags.DEFINE_boolean( 'use_3d_label', False, 'Uses 3D labels if on.')
-flags.DEFINE_boolean( 'use_rotation', True, 'Uses 3D labels if on.')
-flags.DEFINE_boolean( 'use_validation', True, 'Uses 3D labels if on.')
+flags.DEFINE_boolean('use_mesh_repro_loss', False,
+    'specifies whether to use mesh reprojection loss')
+flags.DEFINE_boolean('use_kpr_loss', True,
+    'specifies whether to use mesh reprojection loss')
+flags.DEFINE_boolean('encoder_only', False,
+    'if set to True, no adversarial prior is trained --> monsters')
+flags.DEFINE_boolean('use_gradient_penalty', True,
+    'if set to True, use the gradient penalty for the improved WGAN loss')
 
-flags.DEFINE_boolean('do_bone_evaluation', True, 'Do an evaluation on predicted bone lengths.')
+flags.DEFINE_boolean('use_validation', True, 'Specifies whether to use validation.')
 
-flags.DEFINE_boolean( 'train_from_checkpoint', False, 'Uses 3D labels if on.')
+flags.DEFINE_boolean('do_bone_evaluation', True, 'Specifies whether to do an evaluation on predicted bone lengths.')
+
+flags.DEFINE_boolean('train_from_checkpoint', False, 'Uses 3D labels if on.')
 flags.DEFINE_string('checkpoint_dir', "checkpoints_critic_kp_only_125", 'checkpoint folder')
 
 # Hyper parameters:
+# Learning rates
 flags.DEFINE_float('generator_lr', 0.0001, 'Encoder learning rate')
 flags.DEFINE_float('critic_lr', 0.0005, 'Adversarial prior learning rate')
-
-flags.DEFINE_float('generator_loss_weight', 60, 'weight on E_kp losses')
+# Loss weights
+flags.DEFINE_float('kpr_loss_weight', 60, 'weight on keypoint reprojection losses')
 flags.DEFINE_float('mr_loss_weight', 0.001, 'weight on mesh reprojection loss')
-flags.DEFINE_float('critic_loss_weight', 0.01, 'weight on discriminator')
-
-flags.DEFINE_float('e_3d_weight', 1, 'weight on E_3d')
+flags.DEFINE_float('critic_loss_weight', 0.01, 'weight on discriminator / critic network')
 
 # Data augmentation
 flags.DEFINE_integer('trans_max', 20, 'Value to jitter translation')
@@ -214,12 +204,6 @@ def prepare_dirs(config, prefix=['HMR']):
 
         if config.use_kp_loss:
             postfix.append("kp")
-
-        if config.use_3d_label:
-            print('Using 3D labels!!')
-            prefix.append("3DSUP")
-            if config.e_3d_weight != 1:
-                postfix.append("3dsup-weight%g" % config.e_3d_weight)
 
         prefix.append("_%de_" % config.epoch)
 
