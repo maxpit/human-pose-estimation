@@ -155,7 +155,7 @@ def get_kcs(joints, C_matrix, num_joints=14):
         scores:     N x 3 (2 if use_rotation = False) 
                         - one for skeleton, one for shapes, (one for rotations)
 """
-def CriticNetwork(num_joints=14, use_rotation=True):
+def CriticNetwork(num_joints=14):
 
     # set input shapes
     # for now only 14 joints are possible
@@ -171,13 +171,6 @@ def CriticNetwork(num_joints=14, use_rotation=True):
         kcs_input_shape, joints_input_shape, rotation_input_shape = None
 
     # build the network:
-    if use_rotation:
-        rotation_input = layers.Input(shape=rotation_input_shape, name="rotation_in")
-        rotation_out = layers.Flatten()(rotation_input)
-        rotation_out = layers.Dense(300, activation=tf.nn.leaky_relu, name="rotation_dense_1")(rotation_out)
-        rotation_out = layers.Dense(100, activation=tf.nn.leaky_relu, name="rotation_dense_2")(rotation_out)
-        rotation_out = layers.Dense(1, activation=None, name="rotation_dense_3")(rotation_out)
-
     kcs_input = layers.Input(shape=kcs_input_shape, name="kcs_in")
     kcs_out = layers.Flatten()(kcs_input)
     kcs_out = layers.Dense(100, activation=tf.nn.leaky_relu, name="kcs_dense")(kcs_out)
@@ -194,16 +187,16 @@ def CriticNetwork(num_joints=14, use_rotation=True):
     shapes_out = layers.Dense(5, activation='relu', name="shapes_dense_2")(shapes_out)
     shapes_out = layers.Dense(1, name="shapes_dense_3")(shapes_out)
 
+    rotation_input = layers.Input(shape=rotation_input_shape, name="rotation_in")
+    rotation_out = layers.Flatten()(rotation_input)
+    rotation_out = layers.Dense(300, activation=tf.nn.leaky_relu, name="rotation_dense_1")(rotation_out)
+    rotation_out = layers.Dense(100, activation=tf.nn.leaky_relu, name="rotation_dense_2")(rotation_out)
+    rotation_out = layers.Dense(1, activation=None, name="rotation_dense_3")(rotation_out)
+
     # concatenate outputs
-    if use_rotation:
-        critic_out = tf.concat([critic_joints_out, shapes_out, rotation_out], 1)
-    else:
-        critic_out = tf.concat([critic_joints_out, shapes_out], 1)
+    critic_out = tf.concat([critic_joints_out, shapes_out, rotation_out], 1)
 
     # define model
-    if use_rotation:
-        model = keras.models.Model(inputs=[kcs_input, joints_input, shapes_input, rotation_input], outputs=critic_out)
-    else:
-        model = keras.models.Model(inputs=[kcs_input, joints_input, shapes_input], outputs=critic_out)
+    model = keras.models.Model(inputs=[kcs_input, joints_input, shapes_input, rotation_input], outputs=critic_out)
 
     return model
