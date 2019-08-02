@@ -97,8 +97,6 @@ python -m train --num_epochs=120
 ```
 
 ## Authors
-Maximilian Pittner
-max.pittner _ ät _ tum.de
-Valentin Starlinger
-valentin.starlinger _ ät _ tum.de
+ - Maximilian Pittner max.pittner _ ät _ tum.de
+ - Valentin Starlinger valentin.starlinger _ ät _ tum.de
 
