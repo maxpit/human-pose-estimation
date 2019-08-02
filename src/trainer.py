@@ -1,7 +1,7 @@
 """
-HMR trainer.
+Trainer.
 From an image input, trained a model that outputs 85D latent vector
-consisting of [cam (3 - [scale, tx, ty]), pose (72), shape (10)]
+consisting of [cam (3 - [scale, tx, ty]), orientation (global orientation 3, joint orientations 69), shape (10)]
 """
 
 from __future__ import absolute_import
@@ -30,14 +30,15 @@ from .util import renderer as vis_util
 
 
 class Trainer(object):
+
     """
-    Args:
-      config
-      if no 3D label is available,
-          data_loader is a dict
-      else
-          data_loader is a dict
-    mocap_dataset is a tuple (pose, shape)
+    Input:
+        config
+        dataset:            tuple (image, segmentation gt, keypoint gt)
+        mocap_dataset:      tuple (joints, shape, rotations)
+        val_dataset:        tuple (image, segmentation gt, keypoint gt)
+        validation_only:    if set to True, other datasets are not loaded
+                            and tensorboard files for training are not created.
     """
     def __init__(self, config, dataset = None,
                                mocap_dataset = None,
@@ -706,8 +707,6 @@ class Trainer(object):
 
     def train(self):
         print('started training')
-        # For rendering!
-
         print('...')
         self.mean_var = self.load_mean_param()
         self.global_step = tf.Variable(1, name='global_step', trainable=False, dtype=tf.int64)
