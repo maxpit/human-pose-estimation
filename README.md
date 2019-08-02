@@ -84,7 +84,7 @@ It can be controlled using the following keyboard commands:
 
 ## Training
 
-For training first the datasets need to be created, this can be done by first downloading the LSP and LSP extended datasets and then using the create\_datasets.py file to generate the tfrecords files in the desired dataset directories specified in the config file.
+For training first the datasets need to be created, this can be done by first downloading the [LSP](http://sam.johnson.io/research/lsp.html), [LSP extended](http://files.is.tuebingen.mpg.de/classner/up/) datasets for images and [Unite the People](http://files.is.tuebingen.mpg.de/classner/up/) for segmentation data and then using the create\_datasets.py file to generate the tfrecords files in the desired dataset directories specified in the config file.
 ```
 python -m create_datasets --lsp=True --lsp_val=False --lsp_ext=True --mpii=False
 ```
