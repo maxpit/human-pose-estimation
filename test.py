@@ -3,24 +3,14 @@ from __future__ import division
 from __future__ import print_function
 
 import sys
-from absl import flags
-import numpy as np
 
-#import skimage.io as io
 import tensorflow as tf
-import matplotlib.pyplot as plt
+from absl import flags
 
-#from src.util import renderer as vis_util
-from src.util import image as img_util
-from src.util import openpose as op_util
-import src.config as config
-from src.config import get_config, prepare_dirs, save_config
+from src.config import prepare_dirs, save_config
 from src.data_loader import DataLoader
-#from src.RunModel import RunModel
-#from src.util.load_data import example_run
-from src.trainer import HMRTrainer
+from src.trainer import Trainer
 
-#import src.util.data_utils as du
 
 def main(config):
 #    tf.debugging.set_log_device_placement(True)
@@ -47,7 +37,7 @@ def main(config):
 #    iterator = dataset.make_one_shot_iterator()
 
     config.checkpoint_dir = "training_checkpoints_55_epochs_lspe"
-    trainer = HMRTrainer(config, dataset, smpl_loader, val_dataset)
+    trainer = Trainer(config, dataset, smpl_loader, val_dataset)
     save_config(config)
     trainer.train()
 

@@ -18,7 +18,7 @@ from src.config import get_config, prepare_dirs, save_config
 from src.data_loader import DataLoader
 #from src.RunModel import RunModel
 #from src.util.load_data import example_run
-from src.trainer import HMRTrainer
+from src.trainer import Trainer
 
 def main(config):
 #    tf.debugging.set_log_device_placement(True)
@@ -41,7 +41,7 @@ def main(config):
 
     config.use_mesh_repro_loss = True
     config.use_kp_loss = True
-    trainer = HMRTrainer(config, None, None, val_dataset, validation_only=True)
+    trainer = Trainer(config, None, None, val_dataset, validation_only=True)
     trainer.validate_checkpoint(draw_every_image=True)
 
 if __name__ == '__main__':

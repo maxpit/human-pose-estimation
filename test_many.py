@@ -18,7 +18,7 @@ from src.config import get_config, prepare_dirs, save_config
 from src.data_loader import DataLoader
 #from src.RunModel import RunModel
 #from src.util.load_data import example_run
-from src.trainer import HMRTrainer
+from src.trainer import Trainer
 
 #import src.util.data_utils as du
 
@@ -51,7 +51,7 @@ def main(config):
     config.use_kp_loss = False
 
     prepare_dirs(config)
-    trainer = HMRTrainer(config, dataset, smpl_loader, val_dataset)
+    trainer = Trainer(config, dataset, smpl_loader, val_dataset)
     save_config(config)
     trainer.train()
 
@@ -60,7 +60,7 @@ def main(config):
     config.use_kp_loss = True
 
     prepare_dirs(config)
-    trainer = HMRTrainer(config, dataset, smpl_loader, val_dataset)
+    trainer = Trainer(config, dataset, smpl_loader, val_dataset)
     save_config(config)
     trainer.train()
 
@@ -69,7 +69,7 @@ def main(config):
     config.use_kp_loss = True
 
     prepare_dirs(config)
-    trainer = HMRTrainer(config, dataset, smpl_loader, val_dataset)
+    trainer = Trainer(config, dataset, smpl_loader, val_dataset)
     save_config(config)
     trainer.train()
 
