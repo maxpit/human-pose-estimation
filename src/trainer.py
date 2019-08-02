@@ -49,7 +49,6 @@ class Trainer(object):
         #######################################################################################
         self.model_dir = config.model_dir
         self.logs = config.logs
-        self.load_path = config.load_path
         self.data_format = config.data_format
         self.smpl_model_path = config.smpl_model_path
         self.encoder_only = config.encoder_only
@@ -139,7 +138,6 @@ class Trainer(object):
         #######################################################################################
 
         print('model dir: %s', self.model_dir)
-        print('load path: %s', self.load_path)
         print('data_format: %s', self.data_format)
         print('smpl_model_path: %s', self.smpl_model_path)
         print('encoder only:', self.encoder_only)
