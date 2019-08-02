@@ -18,6 +18,7 @@ from .tf_smpl.projection import batch_orth_proj_idrot
 from .tf_smpl.projection import reproject_vertices
 
 import time
+import datetime
 import tensorflow as tf
 import numpy as np
 import os
@@ -223,7 +224,6 @@ class Trainer(object):
 
 
     def val_step(self, images, seg_gts, kp2d_gts):
-        print("not autographed")
 
         if self.data_format == 'NCHW':
             # B x H x W x 3 --> B x 3 x H x W
@@ -359,7 +359,6 @@ class Trainer(object):
             tf.print("kp2d_gts", kp2d_gts)
             tf.print("joint3d_gt", joint3d_gt)
             tf.print("shape_gts", shape_gts)
-            tf.print("step", self.global_step)
 
         #############################################################################################
         # Generator update
@@ -704,8 +703,14 @@ class Trainer(object):
 
         # Initialize variables
         self.mean_var = self.load_mean_param()
-        self.global_step = tf.Variable(1, name='global_step', trainable=False, dtype=tf.int64)
         step = tf.Variable(0, name='step', trainable=False, dtype=tf.int64)
+
+        kpr_losses = []
+        mr_losses = []
+        kpr_val_losses = []
+        mr_val_losses = []
+        gen_critic_losses = []
+        critic_losses = []
 
         itr = 0
         epoch = 0
@@ -716,6 +721,9 @@ class Trainer(object):
             self.checkpoint.restore(tf.train.latest_checkpoint(self.checkpoint_dir))
             print("checkpoint restored")
 
+
+        print("Starting epoch 0")
+        print("Loading Data")
         # Start looping through dataset, since repeat() is called on them, they repeat infinitely
         # until break is called when max_epochs is reached.
         for data_gen, data_critic, val_data in self.full_dataset:
@@ -732,21 +740,21 @@ class Trainer(object):
                 joints, shapes, rotations = None, None, None
 
             # Do an update step
-            result = self.train_step(images, segmentations, keypoints, joints, shapes,
-                                     rotations, step)
+            result = self.train_step(images, segmentations, keypoints, joints, shapes, rotations)
 
             step = step + 1
 
-            ############################################################################################
-            # Write Generator update to tensorboard
-            ############################################################################################
-
             with self.training_writer.as_default():
+                ############################################################################################
+                # Write Generator update to tensorboard
+                ############################################################################################
                 # make sure only necessary information is printed to tensorboard
                 if self.use_kpr_loss:
                     tf.summary.scalar('generator/kpr_loss', result["kpr_losses"][-1], step=step)
+                    kpr_losses.append(result["kpr_losses"][-1])
                 if self.use_mesh_repro_loss:
                     tf.summary.scalar('generator/mr_loss', result["mr_losses"][-1], step=step)
+                    mr_losses.append(result["mr_losses"][-1])
                 if self.do_bone_evaluation:
                     tf.summary.scalar('bones/avg_total_bone_lenth_pred', result["avg_total_bone_length_pred"], step=step)
                     tf.summary.scalar('bones/avg_total_bone_lenth_gt', result["avg_total_bone_length_gt"], step=step)
@@ -756,7 +764,8 @@ class Trainer(object):
                     show_images = tf.gather(images, self.show_these)
                     show_segs = tf.gather(segmentations, self.show_these)
                     show_kps = tf.gather(keypoints, self.show_these)
-                    print("drawing images now")
+                    if self.debug:
+                        print("drawing images now")
                     self.draw_results(show_images, show_segs, show_kps,
                                        result["generated_verts"], result["pred_keypoints"],
                                        result["generated_cams"], step)
@@ -765,6 +774,8 @@ class Trainer(object):
                 # Write Critic update to tensorboard
                 ############################################################################################
                 if not self.encoder_only:
+                    critic_losses.append(result["critic_network_loss"])
+                    gen_critic_losses.append(result["generator_critic_losses"][-1])
                     tf.summary.scalar('critic/critic_network_loss', result["critic_network_loss"], step=step)
                     tf.summary.scalar('critic/generator_critic_loss',
                                       result["generator_critic_losses"][-1], step=step)
@@ -784,29 +795,39 @@ class Trainer(object):
                 # Perform validation step
                 val_result = self.val_step(val_images, val_segmentations, val_keypoints)
 
-                print("VALIDATION!")
-                print("validation: kp:", result["kpr_losses"][-1].numpy())#, ", mr:", result["mr_losses"][-1].numpy())#, "critic:", result["generator_critic_losses"][-1].numpy())
                 with self.val_writer.as_default():
-                    tf.summary.scalar('generator/kpr_loss', val_result["kpr_losses"][-1], step=step)
+                    if self.use_kpr_loss:
+                        tf.summary.scalar('generator/kpr_loss', val_result["kpr_losses"][-1], step=step)
+                        kpr_val_losses.append(val_result["kpr_losses"][-1])
                     if self.use_mesh_repro_loss:
                         tf.summary.scalar('generator/mr_loss', val_result["mr_losses"][-1], step=step)
+                        mr_val_losses.append(val_result["mr_losses"][-1])
 
                     if tf.equal((step % self.log_img_step), tf.constant(0, dtype=tf.int64)):
                         show_images = tf.gather(val_images, self.show_these)
                         show_segs = tf.gather(val_segmentations, self.show_these)
                         show_kps = tf.gather(val_keypoints, self.show_these)
-                        print("drawing images now")
+                        if self.debug:
+                            print("drawing validation images now")
                         self.draw_results(show_images, show_segs, show_kps,
                                           val_result["generated_verts"], val_result["pred_keypoints"],
                                           val_result["generated_cams"], step)
                     self.val_writer.flush()
 
             itr += 1
-            print("itr", itr, "/", self.num_itr_per_epoch, ", epoch:", epoch, "in", (end_time - start_time), "s")
-            if not self.encoder_only:
-                print("critic_loss", result['critic_network_loss'].numpy(), ", penalty:", result["critic_penalty"].numpy())
-            print("generator: kp:", result["kpr_losses"][-1].numpy())#, ", mr:", result["mr_losses"][-1].numpy())#, "critic:", result["generator_critic_losses"][-1].numpy())
+
+            # Update progress bar
+            length = 30
+            if itr % int(self.num_itr_per_epoch/length) == 0 or itr == 1:
+                percent = ("{0:.1f}").format(100 * (itr / self.num_itr_per_epoch))
+                filledLength = int(length * itr / self.num_itr_per_epoch)
+                bar = '█' * filledLength + '-' * (length - filledLength)
+                prefix = "Epoch {}:".format(epoch)
+                print('\r%s |%s| %s%% %s' % (prefix, bar, percent, ''), end = '\r', flush=True)
+
+            # At end of epoch update epoch log average losses and print new approximate finish time
             if itr >= self.num_itr_per_epoch:
+                print()
                 end_time = time.time()
                 itr = 0
                 epoch += 1
@@ -814,15 +835,52 @@ class Trainer(object):
                 if epoch % 5 == 0:
                     self.checkpoint.save(self.checkpoint_prefix)
 
+                text = "Finished epoch {}, average losses:".format((epoch -1))
+
+                if self.use_kpr_loss:
+                    text += " kpr={:04.2f}".format(np.mean(kpr_losses))
+                if self.use_mesh_repro_loss:
+                    text += " mr={:05.2f}".format(np.mean(mr_losses))
+                if not self.encoder_only:
+                    text += " gc={:05.2f}".format(np.mean(gen_critic_losses))
+                    text += " cn={:05.2f}".format(np.mean(critic_losses))
+                if self.use_validation:
+                    text += " Validation:"
+                    if self.use_kpr_loss:
+                        text += " kpr={:04.2f}".format(np.mean(kpr_val_losses))
+                    if self.use_mesh_repro_loss:
+                        text += " mr={:05.2f}".format(np.mean(mr_val_losses))
+
+                kpr_losses = []
+                mr_losses = []
+                kpr_val_losses = []
+                mr_val_losses = []
+                gen_critic_losses = []
+                critic_losses = []
+
+                print(text)
+
+                # If max epoch reached, finish training
                 if epoch >= self.max_epoch:
                     break
-                print("Starting epoch %i, approx finished in %f4 min. Training finished at approx %i:%i", )
 
-                print("epoch", epoch)
+                finished_date = datetime.datetime.now() + datetime.timedelta(seconds=((self.max_epoch - epoch) * (end_time - start_time)))
+                print("Starting epoch {}, approx finished in {:04.2f} min. Training finished at approx {}".format(epoch, ((end_time - start_time)/60), finished_date))
+
         print('Finish training on %s' % self.model_dir)
 
 
+    '''
+    This function is used to validate a checkpoint against the validation dataset calculating a
+    mean mesh reprojection loss and mean keypoint reprojection loss
+    Inputs:
+        draw_best_worst: if True, the best and worst images/batches for the validation set are
+                            drawn and saved to a tensorboard file
+        draw_every_image: if True, after every iteration the batch/image is drawn and saved to a
+                            tensorboard file
+    '''
     def validate_checkpoint(self,draw_best_worst = False, draw_every_image = False):
+        # initializing vars and restoring checkpoint
         self.mean_var = self.load_mean_param()
         print(self.checkpoint.restore(tf.train.latest_checkpoint(self.checkpoint_dir)).expect_partial())
 
@@ -842,7 +900,9 @@ class Trainer(object):
         for images, segmentations, keypoints in self.val_dataset:
             step += 1
             print("step", step)
+            # do the validation step
             val_result = self.val_step(images, segmentations, keypoints)
+            # add results to aggregated losses
             kpr_losses.append(val_result["kpr_losses"][-1])
             mr_losses.append(val_result["mr_losses"][-1])
 
@@ -852,6 +912,7 @@ class Trainer(object):
                                       val_result["pred_keypoints"],val_result["generated_cams"],step)
                     writer.flush()
 
+            # Update best/worst results
             if draw_best_worst:
                 if best_kp["val"] >= kpr_losses[-1]:
                     best_kp.update({
@@ -917,6 +978,7 @@ class Trainer(object):
                         "cams": val_result["generated_cams"]
                     })
 
+        # If draw_best_worst is true, draw the best and worst images
         if draw_best_worst:
             result_dicts = [best_kp, worst_kp, best_mr, worst_mr, best_combined, worst_combined]
             with writer.as_default():
@@ -925,6 +987,8 @@ class Trainer(object):
                     self.draw_results(d["images"], d["segmentations"], d["keypoints"], d["verts"], d["predicted_keypoints"], d["cams"], step)
                     writer.flush()
                     step += 1
+
+        # Print results
         print(kpr_losses)
         print(mr_losses)
         print("average kpr_loss =", np.mean(kpr_losses))
