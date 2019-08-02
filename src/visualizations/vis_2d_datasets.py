@@ -15,8 +15,6 @@ from src.util import openpose as op_util
 import src.config as config
 from src.config import get_config, prepare_dirs, save_config
 from src.data_loader import DataLoader
-#from src.RunModel import RunModel
-#from src.util.load_data import example_run
 from src.models import Encoder_resnet, Critic_network
 import deepdish as dd
 
