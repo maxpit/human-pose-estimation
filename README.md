@@ -13,8 +13,6 @@ We reused a lot of code from their repository but changed everything to use tens
 	Used for inference, was mainly copied from our reworked src/trainer.py
  - `src/util/create_dataset.py`
 	Used to create the tfrecords files for the different datasets.
- - `src/util/data_utils.py`
-	Utils containing methos for converting data into tfrecords
  - `preview.py`
 	A webcam demo that uses a pretrained model and visulizes the results
  - `train.py`
@@ -38,6 +36,8 @@ We reused a lot of code from their repository but changed everything to use tens
 	Added new config parameters and removed unused ones
  - `src/data_loader.py`
 	Changed to the tensorflow Dataloader API and made changes to accomodate for the additional input data needed (segmentation gt)
+ - `src/util/data_utils.py`
+	Added utils for added segmentation gt
 
 #### No significant changes except for updating to tf2
  - All files in `src/tf_smpl/` except projection.py
