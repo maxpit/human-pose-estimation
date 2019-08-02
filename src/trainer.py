@@ -55,7 +55,6 @@ class Trainer(object):
         self.pretrained_model_path = config.pretrained_model_path
         self.encoder_only = config.encoder_only
         self.use_3d_label = config.use_3d_label
-        self.use_rotation = config.use_rotation
         self.use_validation = config.use_validation
         self.train_from_checkpoint = config.train_from_checkpoint
 
@@ -192,7 +191,7 @@ class Trainer(object):
         # Load models
         self.image_feature_extractor = EncoderNetwork()
         self.generator3d = RegressionNetwork()
-        self.critic_network = CriticNetwork(use_rotation=self.use_rotation)
+        self.critic_network = CriticNetwork()
 
         print("checkpoint")
         self.checkpoint_prefix = os.path.join(self.checkpoint_dir, "ckpt")
@@ -702,10 +701,14 @@ class Trainer(object):
             buf.close()
             plt.close()
 
-
+    '''
+    This method trains the network as specified when initializing the Trainer
+    '''
     def train(self):
         print('started training')
         print('...')
+
+        # Initialize variables
         self.mean_var = self.load_mean_param()
         self.global_step = tf.Variable(1, name='global_step', trainable=False, dtype=tf.int64)
         step = tf.Variable(0, name='step', trainable=False, dtype=tf.int64)
@@ -713,21 +716,30 @@ class Trainer(object):
         itr = 0
         epoch = 0
 
+        # Restore checkpoint from checkpoint_dir
         if self.train_from_checkpoint:
             print("restore checkpoint")
             self.checkpoint.restore(tf.train.latest_checkpoint(self.checkpoint_dir))
             print("checkpoint restored")
 
+        # Start looping through dataset, since repeat() is called on them, they repeat infinitely
+        # until break is called when max_epochs is reached.
         for data_gen, data_critic, val_data in self.full_dataset:
-            images, segmentations, keypoints = data_gen
-            joints, shapes, rotations = data_critic
-            joints = tf.squeeze(joints, axis=1)
-            rotations = tf.squeeze(rotations)[:,1:,:]
+            if itr == 0:
+                start_time = time.time()
 
-            start_time = time.time()
+            # Get data from data loaders
+            images, segmentations, keypoints = data_gen
+            if not self.encoder_only or self.do_bone_evaluation:
+                joints, shapes, rotations = data_critic
+                joints = tf.squeeze(joints, axis=1)
+                rotations = tf.squeeze(rotations)[:,1:,:]
+            else:
+                joints, shapes, rotations = None, None, None
+
+            # Do an update step
             result = self.train_step(images, segmentations, keypoints, joints, shapes,
                                      rotations, step)
-            end_time = time.time()
 
             step = step + 1
 
@@ -736,10 +748,16 @@ class Trainer(object):
             ############################################################################################
 
             with self.training_writer.as_default():
-                tf.summary.scalar('generator/kp_loss', result["kp_losses"][-1], step=step)
+                # make sure only necessary information is printed to tensorboard
+                if self.use_kp_loss:
+                    tf.summary.scalar('generator/kp_loss', result["kp_losses"][-1], step=step)
                 if self.use_mesh_repro_loss:
                     tf.summary.scalar('generator/mr_loss', result["mr_losses"][-1], step=step)
+                if self.do_bone_evaluation:
+                    tf.summary.scalar('bones/avg_total_bone_lenth_pred', result["avg_total_bone_length_pred"], step=step)
+                    tf.summary.scalar('bones/avg_total_bone_lenth_gt', result["avg_total_bone_length_gt"], step=step)
 
+                # every log_img_step draw images and write them to tensorboard
                 if tf.equal((step % self.log_img_step), tf.constant(0, dtype=tf.int64)):
                     show_images = tf.gather(images, self.show_these)
                     show_segs = tf.gather(segmentations, self.show_these)
@@ -749,7 +767,7 @@ class Trainer(object):
                                        result["generated_verts"], result["generated_kps"],
                                        result["generated_cams"], step)
 
-                ##############################################################################################
+                ############################################################################################
                 # Write Critic update to tensorboard
                 ############################################################################################
                 if not self.encoder_only:
@@ -757,17 +775,19 @@ class Trainer(object):
                     tf.summary.scalar('critic/generator_critic_loss',
                                       result["generator_critic_losses"][-1], step=step)
                     tf.summary.scalar('critic/penalty', result["critic_penalty"], step=step)
-                if self.do_bone_evaluation:
-                    tf.summary.scalar('bones/avg_total_bone_lenth_pred', result["avg_total_bone_length_pred"], step=step)
-                    tf.summary.scalar('bones/avg_total_bone_lenth_gt', result["avg_total_bone_length_gt"], step=step)
                 self.training_writer.flush()
 
+            ################################################################################################
+            # Validation step
+            ################################################################################################
+            # If validation should be performed ervery val_step_size validate the current model on
+            # a single batch and print results to tensorboard, if it is also at log_img_step then
+            # draw validation images as well
             if self.use_validation and tf.equal((step % self.val_step_size), tf.constant(0, dtype=tf.int64)):
-                ##########################################################################
-                # validation step
-                ##########################################################################
+                # Get data
                 val_images, val_segmentations, val_keypoints = val_data
 
+                # Perform validation step
                 val_result = self.val_step(val_images, val_segmentations, val_keypoints)
 
                 print("VALIDATION!")
@@ -793,6 +813,7 @@ class Trainer(object):
                 print("critic_loss", result['critic_network_loss'].numpy(), ", penalty:", result["critic_penalty"].numpy())
             print("generator: kp:", result["kp_losses"][-1].numpy())#, ", mr:", result["mr_losses"][-1].numpy())#, "critic:", result["generator_critic_losses"][-1].numpy())
             if itr >= self.num_itr_per_epoch:
+                end_time = time.time()
                 itr = 0
                 epoch += 1
 
@@ -801,6 +822,7 @@ class Trainer(object):
 
                 if epoch >= self.max_epoch:
                     break
+                print("Starting epoch %i, approx finished in %f4 min. Training finished at approx %i:%i", )
 
                 print("epoch", epoch)
         print('Finish training on %s' % self.model_dir)
