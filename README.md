@@ -7,32 +7,42 @@ A detailed report about our project can be found [here](report/report.pdf).
 The project is a hybrid model using approaches from different papers. Our main pipeline is based on the code from Kanazawa et. al. that can be found [here](https://github.com/akanazawa/hmr).
 We reused a lot of code from their repository but changed everything to use tensorflow 2.0 and python 3.5, furthermore we implemented additional loss functions and modified the network architecture. The following list shows which files we modified and what we changed in each of them.
 
-## Changerecord
-### New files
+### Changerecord
+#### New files
  - src/predictor.py
 	Used for inference, was mainly copied from our reworked src/trainer.py
  - src/util/create\_dataset.py
 	Used to create the tfrecords files for the different datasets.
  - src/util/data\_utils.py
 	Utils containing methos for converting data into tfrecords
+ - preview.py
+	A webcam demo that uses a pretrained model and visulizes the results
+ - train.py
+	Used for training the network
+ - validate\_checkpoint.py
+	Can be used get validation scores on the validation set for a given checkpoint
+ - All files in src/visualizations which can be used to visualize the different datasets
 
-### Files changed a lot
+#### Files changed a lot
  - src/trainer.py
 	Due to changes in the dataloader and the change to eager execution and tf2 most of the code here needed to be rewritten
  - src/models.py
 	Added the critic network
  - src/ops.py
 	Added the mesh reprojection loss
+ - src/tf\_smpl/projection.py
+	Added mesh reprojection
 
-### Files changed a little
+#### Files changed a little
  - src/config.py
 	Added new config parameters and removed unused ones
  - src/data\_loader.py
 	Changed to the tensorflow Dataloader API and made changes to accomodate for the additional input data needed (segmentation gt)
 
-### No significant changes except for updating to tf2
- - All files in src/tf\_smpl/
+#### No significant changes except for updating to tf2
+ - All files in src/tf\_smpl/ except projection.py
  - src/util/renderer.py
+ - src/util/image.py
 
 ## Requirements
 - Python 3.5
