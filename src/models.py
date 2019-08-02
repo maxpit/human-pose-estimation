@@ -1,14 +1,13 @@
 """
 Defines networks.
 
-@Encoder_resnet
-@Encoder_resnet_v1_101
-@Encoder_fc3_dropout
-
-@Discriminator_separable_rotations
+@EncoderNetwork
+@RegressionNetwork
+@CriticNetwork
 
 Helper:
-@get_encoder_fn_separate
+@get_kcs
+@precompute_C_matrix
 """
 
 from __future__ import absolute_import

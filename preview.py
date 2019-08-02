@@ -8,24 +8,13 @@ import numpy as np
 
 import cv2
 import tensorflow as tf
-import matplotlib.pyplot as plt
 
-from src.util import renderer as vis_util
-from src.util import image as img_util
-from src.util import openpose as op_util
-import src.config as config
-from src.config import get_config, prepare_dirs, save_config
-import deepdish as dd
-from opendr.renderer import ColoredRenderer
-from opendr.lighting import LambertianPointLight
-from opendr.camera import ProjectPoints
-from src.tf_smpl.batch_smpl import SMPL
 from src.predictor import Predictor
-from os.path import join, dirname
-#import src.util.data_utils as du
 
 from src.util import renderer as vis_util
 from src.util import image as img_util
+
+
 def preprocess_image(img, config):
     if img.shape[2] == 4:
         img = img[:, :, :3]
