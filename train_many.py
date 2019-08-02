@@ -14,7 +14,9 @@ from src.trainer import Trainer
 
 
 def main(config):
-#    tf.debugging.set_log_device_placement(True)
+    # Uncomment to see device placement
+    # tf.debugging.set_log_device_placement(True)
+
     gpus = tf.config.experimental.list_physical_devices('GPU')
     if gpus:
       try:
@@ -26,6 +28,8 @@ def main(config):
       except RuntimeError as e:
         # Memory growth must be set before GPUs have been initialized
         print(e)
+
+    # Prepare directories for saving data
     prepare_dirs(config)
 
     # Load data on CPU
@@ -35,8 +39,7 @@ def main(config):
         smpl_loader = data_loader.get_smpl_loader()
         val_dataset = data_loader.load_val_dataset()
 
-#    iterator = dataset.make_one_shot_iterator()
-
+    # Train with different settings
     config.encoder_only = False
     config.use_mesh_repro_loss = True
     config.use_kp_loss = False
