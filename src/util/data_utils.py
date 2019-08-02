@@ -31,6 +31,12 @@ def parse_example_proto(example_serialized, has_3d=False):
         'image/visibility': tf.io.FixedLenFeature((1, 14), dtype=tf.int64),
         'image/x': tf.io.FixedLenFeature((1, 14), dtype=tf.float32),
         'image/y': tf.io.FixedLenFeature((1, 14), dtype=tf.float32),
+        'image/face_pts': tf.io.FixedLenFeature(
+            (1, 15),
+            dtype=tf.float32,
+            default_value=[
+                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.
+            ]),
     }
 
     features = tf.io.parse_single_example(example_serialized, feature_map)
@@ -39,6 +45,8 @@ def parse_example_proto(example_serialized, has_3d=False):
     width = tf.cast(features['image/width'], tf.int32)
     center = tf.cast(features['image/center'], tf.int32)
     fname = tf.cast(features['image/filename'], tf.string)
+
+    face_pts = tf.reshape(tf.cast(features['image/face_pts'], dtype=tf.float32), [3, 5])
 
     vis = tf.cast(features['image/visibility'], dtype=tf.float32)
     x = tf.cast(features['image/x'], dtype=tf.float32)
