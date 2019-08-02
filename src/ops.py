@@ -18,21 +18,21 @@ import tensorflow as tf
 
 
 """
-    joint_reprojection_loss
+    kp_reprojection_loss
     computes: \Sum_i [0.5 * vis[i] * |kp_gt[i] - kp_pred[i]|] / (|vis|)
     Inputs:
         kp_gt  : N x K x 3
             - N is batch size
-            - K is number of joints/keypoints (19)
+            - K is number of joints/keypoints (19 or 14 depending on gt data)
             - 3 values for x,y position and 1/0 whether the keypoint is visible or not
         kp_pred: N x K x 2
             - N is batch size
-            - K is number of joints/keypoints (19)
+            - K is number of joints/keypoints (19 or 14 depending on gt data)
             - 2 values for x,y
     Outputs:
-        summed L1 loss between predicted and ground truth joints for given mesh
+        summed L1 loss between predicted and ground truth keypoints for given set of reprojected keypoints and gt
 """
-def joint_reprojection_loss(kp_gt, kp_pred, scale=1., name="joint_reprojection_loss"):
+def kp_reprojection_loss(kp_gt, kp_pred, scale=1., name="kp_reprojection_loss"):
 
     with tf.name_scope(name):
         kp_gt = tf.reshape(kp_gt, (-1, 3))

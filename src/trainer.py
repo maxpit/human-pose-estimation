@@ -10,7 +10,7 @@ from __future__ import print_function
 
 from .data_loader import num_examples
 
-from .ops import joint_reprojection_loss, mesh_reprojection_loss, compute_gradient_penalty
+from .ops import kp_reprojection_loss, mesh_reprojection_loss, compute_gradient_penalty
 from .models import CriticNetwork, EncoderNetwork, RegressionNetwork, precompute_C_matrix, get_kcs
 
 from .tf_smpl.batch_smpl import SMPL
@@ -259,9 +259,9 @@ class Trainer(object):
             generated_joint_orientations = theta_here[:, self.num_cam:(self.num_cam + self.num_theta)]
             generated_shapes = theta_here[:, (self.num_cam + self.num_theta):]
 
-            # SMPL generator yields the 3D coordinates of the 6890 vertices, the 19 keypoints/joints
+            # SMPL generator yields the 3D coordinates of the 6890 vertices, the 19 or 14 3D joints (= keypoints when reprojected)
             # and the rotations of the 24 rotation matrices
-            generated_verts, generated_joints, generated_pred_Rs = self.smpl(generated_shapes, generated_joint_orientations, get_skin=True)
+            generated_verts, generated_3d_joints, generated_pred_Rs = self.smpl(generated_shapes, generated_joint_orientations, get_skin=True)
             generated_pred_Rs = generated_pred_Rs[:,1:,:]
 
             # for visualization
@@ -273,13 +273,13 @@ class Trainer(object):
             ##############################################################################################
 
             # calculate keypoint reprojection loss
-            pred_kp = batch_orth_proj_idrot(generated_joints, generated_cams,
+            pred_kp = batch_orth_proj_idrot(generated_3d_joints, generated_cams,
                                                 name='val_proj2d_stage%d' % i)
             # For visulalization
             all_pred_kps.append(tf.gather(pred_kp, self.show_these))
             kpr_losses.append(
-                self.kpr_loss_weight * joint_reprojection_loss(kp2d_gts, pred_kp,
-                                                                 name='val_kp_loss')
+                self.kpr_loss_weight * kp_reprojection_loss(kp2d_gts, pred_kp,
+                                                                 name='val_kpr_loss')
             )
 
             # calculate mesh reprojection loss
@@ -302,10 +302,10 @@ class Trainer(object):
             # calculate ctritic loss
             if not self.encoder_only:
                 all_fake_Rs.append(generated_pred_Rs)
-                kcs = get_kcs(generated_joints, self.C)
+                kcs = get_kcs(generated_3d_joints, self.C)
 
                 generator_critic_out = self.critic_network([kcs,
-                                                   generated_joints[:,:self.num_joints,:],
+                                                   generated_3d_joints[:,:self.num_joints,:],
                                                    generated_shapes,
                                                    generated_pred_Rs],
                                                    training=False
@@ -338,7 +338,7 @@ class Trainer(object):
         if self.use_mesh_repro_loss:
             result["mr_losses"] = mr_losses
         all_pred_kps = tf.stack(all_pred_kps, axis=1)
-        result["generated_kps"] = all_pred_kps
+        result["pred_keypoints"] = all_pred_kps
         all_pred_cams = tf.stack(all_pred_cams, axis=1)
         all_pred_verts = tf.stack(all_pred_verts, axis=1)
         result["generated_verts"] = all_pred_verts
@@ -352,7 +352,7 @@ class Trainer(object):
 
     # the use of `tf.function` causes the function to be "compiled" in tf2.
     @tf.function
-    def train_step(self, images, seg_gts, kp2d_gts, joint3d_gt, shape_gts, Rs_gt, step):
+    def train_step(self, images, seg_gts, kp2d_gts, joint3d_gt, shape_gts, Rs_gt):
 
         print("not autographed")
         if self.debug:
@@ -373,7 +373,7 @@ class Trainer(object):
             images = tf.transpose(images, [0, 3, 1, 2])
             seg_gts = tf.transpose(seg_gts, [0, 3, 1, 2])
 
-        fake_joints = []
+        fake_3d_joints = []
         fake_shapes = []
         kpr_losses = []
         mr_losses = []
@@ -409,14 +409,14 @@ class Trainer(object):
                 generated_shapes = theta_here[:, (self.num_cam + self.num_theta):]
                 fake_shapes.append(generated_shapes)
 
-                # SMPL generator yields the 3D coordinates of the 6890 vertices, the 19 keypoints/joints
+                # SMPL generator yields the 3D coordinates of the 6890 vertices, the 19/14 3D joints (= keypoints when reprojected)
                 # and the rotations of the 24 rotation matrices
-                generated_verts, generated_joints, generated_pred_Rs = self.smpl(generated_shapes, generated_joint_orientations, get_skin=True)
+                generated_verts, generated_3d_joints, generated_pred_Rs = self.smpl(generated_shapes, generated_joint_orientations, get_skin=True)
 
                 # only take the 23 joint orientations, not the global orientation
                 generated_pred_Rs = generated_pred_Rs[:,1:,:]
 
-                fake_joints.append(generated_joints)
+                fake_3d_joints.append(generated_3d_joints)
                 all_fake_Rs.append(generated_pred_Rs)
 
                 # for visualization
@@ -428,12 +428,12 @@ class Trainer(object):
                 ##############################################################################################
 
                 # calculate keypoint reprojection loss
-                pred_kp = batch_orth_proj_idrot(generated_joints, generated_cams,
+                pred_kp = batch_orth_proj_idrot(generated_3d_joints, generated_cams,
                                                     name='proj2d_stage%d' % i)
 
                 # For visualization
                 all_pred_kps.append(tf.gather(pred_kp, self.show_these))
-                kpr_losses.append(self.kpr_loss_weight * joint_reprojection_loss(kp2d_gts, pred_kp))
+                kpr_losses.append(self.kpr_loss_weight * kp_reprojection_loss(kp2d_gts, pred_kp))
 
                 # calculate mesh reprojection loss
                 if self.use_mesh_repro_loss:
@@ -456,11 +456,11 @@ class Trainer(object):
                 if not self.encoder_only:
 
                     # get kcs matrix
-                    kcs = get_kcs(generated_joints, self.C)
+                    kcs = get_kcs(generated_3d_joints, self.C)
 
                     # forward pass through critic network for generator update
                     generator_critic_out = self.critic_network([kcs,
-                                                       generated_joints[:,:self.num_joints,:],
+                                                       generated_3d_joints[:,:self.num_joints,:],
                                                        generated_shapes,
                                                        generated_pred_Rs],
                                                        training=False
@@ -511,7 +511,7 @@ class Trainer(object):
         #############################################################################################
         # Critic update
         #############################################################################################
-        all_fake_joints = tf.concat(fake_joints, 0)[:,:self.num_joints,:]
+        all_fake_3d_joints = tf.concat(fake_3d_joints, 0)[:,:self.num_joints,:]
 
         if not self.encoder_only:
             with tf.GradientTape() as critic_tape:
@@ -522,9 +522,9 @@ class Trainer(object):
                 if self.debug:
                     tf.print('real_joints', joint3d_gt)
                     tf.print('real_shapes', shape_gts)
-                    tf.print('fake_joints', fake_joints)
+                    tf.print('fake_3d_joints', fake_3d_joints)
                     tf.print('fake_shapes', fake_shapes)
-                    tf.print('all_fake_joints', all_fake_joints)
+                    tf.print('all_fake_3d_joints', all_fake_3d_joints)
                     tf.print('all_fake_shapes', all_fake_shapes)
 
                 real_kcs = get_kcs(joint3d_gt, self.C)
@@ -536,11 +536,11 @@ class Trainer(object):
                                                    Rs_gt],
                                                    training=True)
 
-                fake_kcs = get_kcs(all_fake_joints, self.C)
+                fake_kcs = get_kcs(all_fake_3d_joints, self.C)
 
                 # forward pass with fake data
                 fake_output = self.critic_network([fake_kcs,
-                                                   all_fake_joints,
+                                                   all_fake_3d_joints,
                                                    all_fake_shapes,
                                                    all_fake_Rs],
                                                    training=True)
@@ -551,24 +551,24 @@ class Trainer(object):
                 # compute the gradient penalty for the improved WGAN loss
                 if self.use_gradient_penalty:
                     # interpolated inputs for the discriminator forward pass
-                    alpha = tf.random.uniform(all_fake_joints.shape)
+                    alpha = tf.random.uniform(all_fake_3d_joints.shape)
                     beta = tf.random.uniform(all_fake_shapes.shape)
                     gamma = tf.random.uniform(all_fake_Rs.shape)
-                    interpolated_joints = all_fake_joints + alpha * (joint3d_gt - all_fake_joints)
-                    interpolated_kcs = get_kcs(interpolated_joints, self.C)
+                    interpolated_3d_joints = all_fake_3d_joints + alpha * (joint3d_gt - all_fake_3d_joints)
+                    interpolated_kcs = get_kcs(interpolated_3d_joints, self.C)
                     interpolated_shapes = all_fake_shapes + beta * (shape_gts - all_fake_shapes)
                     interpolated_Rs = all_fake_Rs + gamma * (Rs_gt - all_fake_Rs)
 
                     # forward pass with interpolated inputs
                     out_interpolated = self.critic_network([interpolated_kcs,
-                                                            interpolated_joints[:, :self.num_joints, :],
+                                                            interpolated_3d_joints[:, :self.num_joints, :],
                                                             interpolated_shapes,
                                                             interpolated_Rs],
                                                            training=False)
                     # get gradients
                     gradients_to_penalize = tf.gradients(ys=out_interpolated,
                                                          xs=[interpolated_kcs,
-                                                             interpolated_joints,
+                                                             interpolated_3d_joints,
                                                              interpolated_shapes,
                                                              interpolated_Rs])
 
@@ -599,7 +599,7 @@ class Trainer(object):
         if self.use_mesh_repro_loss:
             result["mr_losses"] = mr_losses
         all_pred_kps = tf.stack(all_pred_kps, axis=1)
-        result["generated_kps"] = all_pred_kps
+        result["pred_keypoints"] = all_pred_kps
         all_pred_cams = tf.stack(all_pred_cams, axis=1)
         all_pred_verts = tf.stack(all_pred_verts, axis=1)
         result["generated_verts"] = all_pred_verts
@@ -611,7 +611,7 @@ class Trainer(object):
             result["critic_network_loss"] = critic_network_loss
 
         if self.do_bone_evaluation:
-            bones_pred = tf.linalg.diag_part(get_kcs(all_fake_joints, self.C))
+            bones_pred = tf.linalg.diag_part(get_kcs(all_fake_3d_joints, self.C))
             avg_total_bone_length_pred = tf.reduce_mean(tf.reduce_sum(bones_pred, axis=1))
             result["avg_total_bone_length_pred"] = avg_total_bone_length_pred
 
@@ -745,8 +745,8 @@ class Trainer(object):
 
             with self.training_writer.as_default():
                 # make sure only necessary information is printed to tensorboard
-                if self.use_kp_loss:
-                    tf.summary.scalar('generator/kp_loss', result["kp_losses"][-1], step=step)
+                if self.use_kpr_loss:
+                    tf.summary.scalar('generator/kpr_loss', result["kpr_losses"][-1], step=step)
                 if self.use_mesh_repro_loss:
                     tf.summary.scalar('generator/mr_loss', result["mr_losses"][-1], step=step)
                 if self.do_bone_evaluation:
@@ -760,7 +760,7 @@ class Trainer(object):
                     show_kps = tf.gather(keypoints, self.show_these)
                     print("drawing images now")
                     self.draw_results(show_images, show_segs, show_kps,
-                                       result["generated_verts"], result["generated_kps"],
+                                       result["generated_verts"], result["pred_keypoints"],
                                        result["generated_cams"], step)
 
                 ############################################################################################
@@ -787,9 +787,9 @@ class Trainer(object):
                 val_result = self.val_step(val_images, val_segmentations, val_keypoints)
 
                 print("VALIDATION!")
-                print("validation: kp:", result["kp_losses"][-1].numpy())#, ", mr:", result["mr_losses"][-1].numpy())#, "critic:", result["generator_critic_losses"][-1].numpy())
+                print("validation: kp:", result["kpr_losses"][-1].numpy())#, ", mr:", result["mr_losses"][-1].numpy())#, "critic:", result["generator_critic_losses"][-1].numpy())
                 with self.val_writer.as_default():
-                    tf.summary.scalar('generator/kp_loss', val_result["kp_losses"][-1], step=step)
+                    tf.summary.scalar('generator/kpr_loss', val_result["kpr_losses"][-1], step=step)
                     if self.use_mesh_repro_loss:
                         tf.summary.scalar('generator/mr_loss', val_result["mr_losses"][-1], step=step)
 
@@ -799,7 +799,7 @@ class Trainer(object):
                         show_kps = tf.gather(val_keypoints, self.show_these)
                         print("drawing images now")
                         self.draw_results(show_images, show_segs, show_kps,
-                                          val_result["generated_verts"], val_result["generated_kps"],
+                                          val_result["generated_verts"], val_result["pred_keypoints"],
                                           val_result["generated_cams"], step)
                     self.val_writer.flush()
 
@@ -807,7 +807,7 @@ class Trainer(object):
             print("itr", itr, "/", self.num_itr_per_epoch, ", epoch:", epoch, "in", (end_time - start_time), "s")
             if not self.encoder_only:
                 print("critic_loss", result['critic_network_loss'].numpy(), ", penalty:", result["critic_penalty"].numpy())
-            print("generator: kp:", result["kp_losses"][-1].numpy())#, ", mr:", result["mr_losses"][-1].numpy())#, "critic:", result["generator_critic_losses"][-1].numpy())
+            print("generator: kp:", result["kpr_losses"][-1].numpy())#, ", mr:", result["mr_losses"][-1].numpy())#, "critic:", result["generator_critic_losses"][-1].numpy())
             if itr >= self.num_itr_per_epoch:
                 end_time = time.time()
                 itr = 0
@@ -828,7 +828,7 @@ class Trainer(object):
         self.mean_var = self.load_mean_param()
         print(self.checkpoint.restore(tf.train.latest_checkpoint(self.checkpoint_dir)).expect_partial())
 
-        kp_losses = []
+        kpr_losses = []
         mr_losses = []
         step = 0
         if draw_best_worst:
@@ -845,35 +845,35 @@ class Trainer(object):
             step += 1
             print("step", step)
             val_result = self.val_step(images, segmentations, keypoints)
-            kp_losses.append(val_result["kp_losses"][-1])
+            kpr_losses.append(val_result["kpr_losses"][-1])
             mr_losses.append(val_result["mr_losses"][-1])
 
             if draw_every_image:
                 with writer.as_default():
                     self.draw_results(images, segmentations, keypoints, val_result["generated_verts"],
-                                      val_result["generated_kps"],val_result["generated_cams"],step)
+                                      val_result["pred_keypoints"],val_result["generated_cams"],step)
                     writer.flush()
 
             if draw_best_worst:
-                if best_kp["val"] >= kp_losses[-1]:
+                if best_kp["val"] >= kpr_losses[-1]:
                     best_kp.update({
-                        "val": kp_losses[-1],
+                        "val": kpr_losses[-1],
                         "images": images,
                         "segmentations": segmentations,
                         "keypoints": keypoints,
                         "verts": val_result["generated_verts"],
-                        "kps": val_result["generated_kps"],
+                        "predicted_keypoints": val_result["pred_keypoints"],
                         "cams": val_result["generated_cams"]
                     })
 
-                if worst_kp["val"] <= kp_losses[-1]:
+                if worst_kp["val"] <= kpr_losses[-1]:
                     worst_kp.update({
-                        "val": kp_losses[-1],
+                        "val": kpr_losses[-1],
                         "images": images,
                         "segmentations": segmentations,
                         "keypoints": keypoints,
                         "verts": val_result["generated_verts"],
-                        "kps": val_result["generated_kps"],
+                        "predicted_keypoints": val_result["pred_keypoints"],
                         "cams": val_result["generated_cams"]
                     })
 
@@ -884,7 +884,7 @@ class Trainer(object):
                         "segmentations": segmentations,
                         "keypoints": keypoints,
                         "verts": val_result["generated_verts"],
-                        "kps": val_result["generated_kps"],
+                        "predicted_keypoints": val_result["pred_keypoints"],
                         "cams": val_result["generated_cams"]
                     })
                 if worst_mr["val"] <= mr_losses[-1]:
@@ -894,28 +894,28 @@ class Trainer(object):
                         "segmentations": segmentations,
                         "keypoints": keypoints,
                         "verts": val_result["generated_verts"],
-                        "kps": val_result["generated_kps"],
+                        "predicted_keypoints": val_result["pred_keypoints"],
                         "cams": val_result["generated_cams"]
                     })
 
-                if best_combined["val"] >= (mr_losses[-1] + kp_losses[-1]):
+                if best_combined["val"] >= (mr_losses[-1] + kpr_losses[-1]):
                     best_combined.update({
-                        "val": (mr_losses[-1] + kp_losses[-1]),
+                        "val": (mr_losses[-1] + kpr_losses[-1]),
                         "images": images,
                         "segmentations": segmentations,
                         "keypoints": keypoints,
                         "verts": val_result["generated_verts"],
-                        "kps": val_result["generated_kps"],
+                        "predicted_keypoints": val_result["pred_keypoints"],
                         "cams": val_result["generated_cams"]
                     })
-                if worst_combined["val"] <= (mr_losses[-1] + kp_losses[-1]):
+                if worst_combined["val"] <= (mr_losses[-1] + kpr_losses[-1]):
                     worst_combined.update({
-                        "val": (mr_losses[-1] + kp_losses[-1]),
+                        "val": (mr_losses[-1] + kpr_losses[-1]),
                         "images": images,
                         "segmentations": segmentations,
                         "keypoints": keypoints,
                         "verts": val_result["generated_verts"],
-                        "kps": val_result["generated_kps"],
+                        "predicted_keypoints": val_result["pred_keypoints"],
                         "cams": val_result["generated_cams"]
                     })
 
@@ -924,10 +924,10 @@ class Trainer(object):
             with writer.as_default():
                 step = 0
                 for d in result_dicts:
-                    self.draw_results(d["images"], d["segmentations"], d["keypoints"], d["verts"], d["kps"], d["cams"], step)
+                    self.draw_results(d["images"], d["segmentations"], d["keypoints"], d["verts"], d["predicted_keypoints"], d["cams"], step)
                     writer.flush()
                     step += 1
-        print(kp_losses)
+        print(kpr_losses)
         print(mr_losses)
-        print("average kp_loss =", np.mean(kp_losses))
+        print("average kpr_loss =", np.mean(kpr_losses))
         print("average mr_loss =", np.mean(mr_losses))
