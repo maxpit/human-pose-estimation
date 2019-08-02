@@ -6,7 +6,6 @@ import matplotlib.pyplot as plt
 
 from glob import glob
 from os.path import basename
-from .common import ImageCoder
 from os.path import join, dirname
 
 file_dir = '/home/valentin/Code/ADL/human-pose-estimation/data/'
@@ -58,7 +57,6 @@ def _add_to_tfrecord(img_path, gt_path, label, writer, is_lsp_ext=False, is_mpii
     #print("width,height", seg_gt.shape)
     #img = np.array(io.imread(img_path))
     #+gt = np.array(io.imread(gt_path))
-    #gt = coder.decode_jpeg(seg_data)
 
     img = tf.image.decode_jpeg(image_data)
     #plt.imshow(img)
