@@ -23,11 +23,11 @@ We reused a lot of code from their repository but changed everything to use tens
 
 #### Files changed a lot
  - `src/trainer.py`
-	Due to changes in the dataloader and the change to eager execution and tf2 most of the code here needed to be rewritten
+	Due to changes in the dataloader and the change to eager execution and tf2 most of the code here needed to be rewritten. The two methods for visualization remained mostly unchanged.
  - `src/models.py`
 	Added the critic network
  - `src/ops.py`
-	Added the mesh reprojection loss
+	Added the mesh reprojection loss and critic gradient penalty loss
  - `src/tf_smpl/projection.py`
 	Added mesh reprojection
 
@@ -46,7 +46,7 @@ We reused a lot of code from their repository but changed everything to use tens
 
 ## Requirements
 - Python 3.5
-- [TensorFlow](https://www.tensorflow.org/) tested with version 2.0
+- [TensorFlow](https://www.tensorflow.org/) 2.0
 
 ## Installation 
 ### Create the environment
@@ -85,7 +85,9 @@ It can be controlled using the following keyboard commands:
 ## Training
 
 For training first the datasets need to be created, this can be done by first downloading the LSP and LSP extended datasets and then using the create\_datasets.py file to generate the tfrecords files in the desired dataset directories specified in the config file.
-
+```
+python -m create_datasets --lsp=True --lsp_val=False --lsp_ext=True --mpii=False
+```
 To get the 3D data for training the critic network please follow the instructions provided [here](https://github.com/akanazawa/hmr/blob/master/doc/train.md#mosh-data).
 
 After configuring the tfrecord files, the training can be started by using the `train.py` file. The parameters for the training can either be configured by editing the `src/config.py` file or by using the corresponding flags.
