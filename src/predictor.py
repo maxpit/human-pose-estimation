@@ -8,27 +8,14 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from .data_loader import num_examples
+from .models import CriticNetwork, EncoderNetwork, RegressionNetwork
 
-from .ops import keypoint_l1_loss, compute_3d_loss, align_by_pelvis, mesh_reprojection_loss
-from .models import Critic_network, Encoder_resnet, Encoder_fc3_dropout, precompute_C_matrix, get_kcs
-
-from .tf_smpl.batch_lbs import batch_rodrigues
 from .tf_smpl.batch_smpl import SMPL
 from .tf_smpl.projection import batch_orth_proj_idrot
-from .tf_smpl.projection import reproject_vertices
 
-from tensorflow.python.ops import control_flow_ops
-from tensorflow.python.ops.losses import losses
-
-import time
-from datetime import datetime
 import tensorflow as tf
 import numpy as np
 import os
-
-from tensorflow.python.ops import resources
-from tensorflow.python.ops import variables
 
 from os.path import join, dirname
 import deepdish as dd
@@ -86,9 +73,9 @@ class Predictor(object):
         self.critic_optimizer = tf.keras.optimizers.Adam(0)
 
         # Load models
-        self.image_feature_extractor = Encoder_resnet()
-        self.generator3d = Encoder_fc3_dropout()
-        self.critic_network = Critic_network(use_rotation=True)
+        self.image_feature_extractor = EncoderNetwork()
+        self.generator3d = RegressionNetwork()
+        self.critic_network = CriticNetwork(use_rotation=True)
 
         #Restore checkpoint
         self.checkpoint_prefix = os.path.join(self.checkpoint_dir, "ckpt")

@@ -1,3 +1,15 @@
+"""
+Defines loss functions.
+
+@joint_reprojection_loss
+@mesh_reprojection_loss
+@compute_gradient_penalty
+
+Helper:
+@find_nearest_neighbors
+@bidirectional_dist
+"""
+
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -125,6 +137,19 @@ def mesh_reprojection_loss(silhouette_gt, silhouette_pred, batch_size, name="mes
         return loss
 
 
+"""
+    compute_gradient_penalty
+    Computes the penalization of discriminator gradients if magnitude deviates from 1.
+    Needed for the improved WGAN loss.
+    Inputs:
+        gradients:      list of tensors of length 4
+                                - first is gradient wrt kcs input
+                                - second is gradient wrt joints input
+                                - third is gradient wrt shape input
+                                - fourth is gradient wrt rotation input
+    Outputs:
+        penalty
+"""
 def compute_gradient_penalty(gradients, debug=False):
 
     penalty_1 = tf.square(
