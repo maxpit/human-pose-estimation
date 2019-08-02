@@ -18,6 +18,7 @@ import json
 
 import numpy as np
 
+
 curr_path = osp.dirname(osp.abspath(__file__))
 model_dir = osp.join(curr_path, '..', 'models')
 if not osp.exists(model_dir):
@@ -54,9 +55,8 @@ flags.DEFINE_string(
     'cocoplus (19 keypoints) or lsp 14 keypoints, returned by SMPL')
 
 # Training settings:
-# TODO! If you want to train, change this to your 'tf_datasets' or specify it with the flag.
+# Specify the path to your datasets here.
 DATA_DIR = '/home/valentin/Code/ADL/human-pose-estimation/datasets'
-
 flags.DEFINE_string('data_dir', DATA_DIR, 'Where to save training models')
 flags.DEFINE_string('logs', 'logs', 'Where to save training models')
 flags.DEFINE_string('model_dir', None, 'Where model will be saved -- filled automatically')
@@ -87,18 +87,18 @@ flags.DEFINE_boolean( 'use_3d_label', False, 'Uses 3D labels if on.')
 flags.DEFINE_boolean( 'use_rotation', True, 'Uses 3D labels if on.')
 flags.DEFINE_boolean( 'use_validation', True, 'Uses 3D labels if on.')
 
+flags.DEFINE_boolean('do_bone_evaluation', True, 'Do an evaluation on predicted bone lengths.')
+
 flags.DEFINE_boolean( 'train_from_checkpoint', False, 'Uses 3D labels if on.')
 flags.DEFINE_string('checkpoint_dir', "checkpoints_critic_kp_only_125", 'checkpoint folder')
+
 # Hyper parameters:
 flags.DEFINE_float('generator_lr', 0.0001, 'Encoder learning rate')
 flags.DEFINE_float('critic_lr', 0.0005, 'Adversarial prior learning rate')
-flags.DEFINE_float('e_wd', 0.0001, 'Encoder weight decay')
-flags.DEFINE_float('d_wd', 0.0001, 'Adversarial prior weight decay')
 
 flags.DEFINE_float('generator_loss_weight', 60, 'weight on E_kp losses')
 flags.DEFINE_float('mr_loss_weight', 0.001, 'weight on mesh reprojection loss')
 flags.DEFINE_float('critic_loss_weight', 0.01, 'weight on discriminator')
-
 
 flags.DEFINE_float('e_3d_weight', 1, 'weight on E_3d')
 
@@ -106,6 +106,9 @@ flags.DEFINE_float('e_3d_weight', 1, 'weight on E_3d')
 flags.DEFINE_integer('trans_max', 20, 'Value to jitter translation')
 flags.DEFINE_float('scale_max', 1.23, 'Max value of scale jitter')
 flags.DEFINE_float('scale_min', 0.8, 'Min value of scale jitter')
+
+# Debug mode
+flags.DEFINE_boolean('debug', False, 'If set to True, print information that is helpful for debugging.')
 
 
 def get_config():

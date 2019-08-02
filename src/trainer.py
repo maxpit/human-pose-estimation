@@ -58,42 +58,43 @@ class Trainer(object):
         self.use_rotation = config.use_rotation
         self.use_validation = config.use_validation
         self.train_from_checkpoint = config.train_from_checkpoint
+
         # Data size
         self.img_size = config.img_size
-        #print(self.img_size)
         self.num_stage = config.num_stage
         self.batch_size = config.batch_size
         self.max_epoch = config.epoch
         self.use_mesh_repro_loss = config.use_mesh_repro_loss
         self.use_kp_loss= config.use_kp_loss
+
         # Data
         num_images = num_examples(config.datasets)
         num_mocap = num_examples(config.mocap_datasets)
         self.val_step_size = config.validation_step_size
         self.log_img_step = config.log_img_step
-        self.validation_step_size = config.validation_step_size
         self.checkpoint_dir = config.checkpoint_dir
-        # Model spec
-        self.model_type = config.model_type
-        # Weight decay
-        self.e_wd = config.e_wd
-        self.d_wd = config.d_wd
 
         # Gather loss weights
         self.generator_kp_loss_weight = config.generator_loss_weight
         self.critic_loss_weight = config.critic_loss_weight
-        self.e_3d_weight = config.e_3d_weight
         self.mr_loss_weight = config.mr_loss_weight
 
         # Optimizer, learning rate
         self.generator_lr = config.generator_lr
         self.critic_lr = config.critic_lr
 
+        # Use the gradient penalty for the improved WGAN loss.
+        # Should be set to True as no gradient clipping is provided.
         self.use_gradient_penalty = config.use_gradient_penalty
-        self.num_joints = 14
-        self.do_bone_evaluation = True
 
-        self.debug = False
+        # Do additional bone length evaluation
+        self.do_bone_evaluation = config.do_bone_evaluation
+
+        # Number of jonints used for critic network --> has to be 14 for now
+        self.num_joints = 14
+
+        # Enable debugging
+        self.debug = config.debug
 
         #######################################################################################
         # Calculate necessary information
@@ -105,7 +106,7 @@ class Trainer(object):
         self.proj_fn = batch_orth_proj_idrot
 
         self.num_cam = 3
-        self.num_theta = 72  # 24 * 3
+        self.num_theta = 72  # 1*3 (global) + 23 * 3
         self.total_params = self.num_theta + self.num_cam + 10
 
         self.num_itr_per_epoch = num_images / self.batch_size
@@ -663,7 +664,6 @@ class Trainer(object):
     def draw_results(self, imgs, segs_gt, gt_kps, est_verts, pred_kps, cam, step):
         import io
         import matplotlib.pyplot as plt
-        import cv2
 
         imgs = imgs.numpy()
         segs_gt = segs_gt.numpy()
@@ -674,8 +674,6 @@ class Trainer(object):
 
         if self.data_format == 'NCHW':
             imgs = np.transpose(imgs, [0, 2, 3, 1])
-
-        img_summaries = []
 
         for img_id, (img, seg_gt, gt_kp, verts, keypoints, cams) in enumerate(
                 zip(imgs, segs_gt, gt_kps, est_verts, pred_kps, cam)):
