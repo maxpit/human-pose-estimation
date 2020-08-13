@@ -38,3 +38,4 @@ def scale_and_crop(image, scale, center, img_size):
     }
 
     return crop, proc_param
+
